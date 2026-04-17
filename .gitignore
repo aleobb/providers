@@ -1,0 +1,43 @@
+# Credenciales — NUNCA commitear
+.env
+*.env
+*_session.json
+visa_session.json
+
+# Facturas descargadas (datos personales)
+facturas/
+
+# Logs de ejecucion
+ejecucion.log
+
+# Archivos de debug / screenshots
+*.png
+*.jpg
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Entorno virtual
+venv/
+.venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Windows
+Thumbs.db
+Desktop.ini

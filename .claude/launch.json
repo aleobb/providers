@@ -1,0 +1,53 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Todos los proveedores",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["main.py", "--todos-proveedores", "--todas"],
+      "port": null
+    },
+    {
+      "name": "Visa (debug)",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["main.py", "--proveedor", "visa", "--todas", "--debug"],
+      "port": null
+    },
+    {
+      "name": "Mastercard (debug)",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["main.py", "--proveedor", "mastercard", "--todas", "--debug"],
+      "port": null
+    },
+    {
+      "name": "Edenor",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["main.py", "--proveedor", "edenor", "--todas"],
+      "port": null
+    },
+    {
+      "name": "Edesur (debug)",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["main.py", "--proveedor", "edesur", "--todas", "--debug"],
+      "port": null
+    },
+    {
+      "name": "Metrogas",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["main.py", "--proveedor", "metrogas", "--todas"],
+      "port": null
+    },
+    {
+      "name": "Telecentro",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["main.py", "--proveedor", "telecentro", "--todas"],
+      "port": null
+    },
+    {
+      "name": "Claro",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["main.py", "--proveedor", "claro", "--todas"],
+      "port": null
+    }
+  ]
+}

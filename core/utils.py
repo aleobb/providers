@@ -44,6 +44,14 @@ async def dismiss_popups(page, *, label: str = "") -> int:
         'a:has-text("Cerrar")',
         'a:has-text("cerrar")',
         'button:has-text("Cancelar")',
+        # Confirmacion generica de avisos / habilitacion de tarjetas / legales
+        'button:has-text("Entendido")',
+        'button:has-text("entendido")',
+        'button:has-text("Aceptar")',
+        'button:has-text("aceptar")',
+        'button:has-text("De acuerdo")',
+        'button:has-text("OK")',
+        'button:has-text("Continuar")',
         # X tipico de modal
         'button:text-is("x")',
         'button:text-is("X")',

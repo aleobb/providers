@@ -10,7 +10,7 @@ from playwright.async_api import BrowserContext, Page, TimeoutError as Playwrigh
 
 from core.accounts import Account
 from core.exceptions import DownloadError, InvoiceNotFoundError
-from core.utils import unique_path
+from core.utils import dismiss_popups, unique_path
 from .config import VisaConfig
 from .interceptor import NetworkInterceptor
 
@@ -93,8 +93,13 @@ class InvoiceService:
         # la URL sigue siendo mistarjetas pero el contenido no es el card-list.
         await self.page.goto(self.config.portal_url, timeout=self.config.timeout_ms)
         await self.page.wait_for_load_state("networkidle", timeout=self.config.timeout_ms)
-        await asyncio.sleep(2)
-        await self._close_popup()
+        await asyncio.sleep(1)
+        # Cerrar popups (habilitacion de tarjetas, avisos legales, etc.) - hasta 3 rondas
+        for _ in range(3):
+            closed = await dismiss_popups(self.page, label="visa")
+            if not closed:
+                break
+            await asyncio.sleep(0.4)
 
     async def _navigate_to_resumen(self, account: Account) -> str:
         """
@@ -118,7 +123,7 @@ class InvoiceService:
             await self.page.wait_for_load_state("networkidle", timeout=15000)
         except Exception:
             pass
-        await asyncio.sleep(3)
+        await asyncio.sleep(2)
         print(f"  [Visa] Resumen cargado. URL: {self.page.url}")
 
         # Verificar si hay resumen disponible para esta tarjeta
@@ -193,7 +198,7 @@ class InvoiceService:
         for sel in playwright_selectors:
             try:
                 el = self.page.locator(sel).first
-                if await el.count() > 0 and await el.is_visible(timeout=2000):
+                if await el.count() > 0 and await el.is_visible(timeout=500):
                     await el.click()
                     print(f"  [Visa] Selector de tarjetas abierto ({sel})")
                     return True
@@ -231,9 +236,11 @@ class InvoiceService:
     async def _click_card_in_dropdown(self, last4: str) -> None:
         """
         Con el dropdown ya abierto, clickea el LI que corresponde a last4.
-        Muestra el dump del DOM para diagnostico.
+        En modo debug muestra el dump del DOM para diagnostico.
         """
-        await self._dump_card_selector_elements(last4)
+        # Solo volcar DOM en modo debug (headless=False) para no ralentizar produccion
+        if not self.config.headless:
+            await self._dump_card_selector_elements(last4)
 
         result = await self.page.evaluate(
             r"""(last4) => {
@@ -271,12 +278,17 @@ class InvoiceService:
             fb = " (fallback)" if result.get("fallback") else ""
             cls = result.get("cls", "")
             print(f"  [Visa] Tarjeta ****{last4} seleccionada{fb} (.{cls}): {result.get('text','')!r}")
-            await asyncio.sleep(3)
+            await asyncio.sleep(1.5)
             try:
-                await self.page.wait_for_load_state("networkidle", timeout=10000)
+                await self.page.wait_for_load_state("networkidle", timeout=8000)
             except Exception:
                 pass
-            await self._close_popup()
+            # Cerrar popups post-switch (habilitacion de tarjeta, avisos, etc.) - hasta 3 rondas
+            for _ in range(3):
+                closed = await dismiss_popups(self.page, label="visa-card-switch")
+                if not closed:
+                    break
+                await asyncio.sleep(0.4)
         else:
             print(f"  [Visa] No se encontro LI para ****{last4} en el dropdown.")
             print(f"  [Visa] Se descargara la tarjeta activa en lugar de ****{last4}.")
@@ -393,7 +405,7 @@ class InvoiceService:
     async def _try_download_event(self) -> bytes | None:
         """Intenta capturar un evento de descarga del browser."""
         try:
-            async with self.page.expect_download(timeout=8000) as dl_info:
+            async with self.page.expect_download(timeout=3000) as dl_info:
                 await self._click_download_button()
             download = await dl_info.value
             path = await download.path()
@@ -410,7 +422,7 @@ class InvoiceService:
     async def _try_popup_download(self) -> bytes | None:
         """Intercepta popup/nueva pestana con URL al PDF."""
         try:
-            async with self.page.expect_popup(timeout=8000) as popup_info:
+            async with self.page.expect_popup(timeout=3000) as popup_info:
                 await self._click_download_button()
             popup = await popup_info.value
             await popup.wait_for_load_state("domcontentloaded", timeout=15000)

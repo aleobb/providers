@@ -97,6 +97,7 @@ class InvoiceService:
         # Cerrar popups (habilitacion de tarjetas, avisos legales, etc.) - hasta 3 rondas
         for _ in range(3):
             closed = await dismiss_popups(self.page, label="visa")
+            closed = closed or await self._close_visa_modal()
             if not closed:
                 break
             await asyncio.sleep(0.4)
@@ -286,6 +287,7 @@ class InvoiceService:
             # Cerrar popups post-switch (habilitacion de tarjeta, avisos, etc.) - hasta 3 rondas
             for _ in range(3):
                 closed = await dismiss_popups(self.page, label="visa-card-switch")
+                closed = closed or await self._close_visa_modal()
                 if not closed:
                     break
                 await asyncio.sleep(0.4)
@@ -383,6 +385,70 @@ class InvoiceService:
                     print(f"    <a href={href!r}> {text!r}")
         except Exception as e:
             print(f"  [Visa] No se pudieron leer links del resumen: {e}")
+
+    async def _close_visa_modal(self) -> bool:
+        """
+        Cierra modales/dialogs del portal Visa (habilitacion de tarjeta, avisos, etc.)
+        buscando botones de confirmacion DENTRO de un contenedor modal visible.
+        Solo clickea si hay un overlay/dialog en pantalla — evita clickear botones
+        de navegacion normales que comparten los mismos textos (Aceptar, Continuar, etc.).
+        """
+        try:
+            result = await self.page.evaluate(
+                r"""() => {
+                    // Contenedores tipicos de modal/dialog
+                    const MODAL_SELS = [
+                        '[role="dialog"]', '[role="alertdialog"]',
+                        '.modal-content', '.modal-body', '.modal',
+                        '[class*="modal"]', '[class*="dialog"]', '[class*="popup"]',
+                        '[class*="overlay"]', '[class*="layer"]',
+                    ];
+                    let modal = null;
+                    for (const sel of MODAL_SELS) {
+                        const els = document.querySelectorAll(sel);
+                        for (const el of els) {
+                            if (el.offsetParent !== null
+                                    && el.getBoundingClientRect().width > 50) {
+                                modal = el;
+                                break;
+                            }
+                        }
+                        if (modal) break;
+                    }
+                    if (!modal) return { closed: false };
+
+                    // Botones de cierre dentro del modal (orden: rechazo > confirmacion)
+                    const CLOSE_TEXTS = [
+                        'Cerrar', 'cerrar', 'No, gracias', 'No gracias',
+                        'Omitir', 'Cancelar', 'Entendido', 'Aceptar',
+                        'De acuerdo', 'OK', 'Continuar',
+                    ];
+                    const btns = Array.from(modal.querySelectorAll('button, a'));
+                    for (const text of CLOSE_TEXTS) {
+                        const btn = btns.find(
+                            b => (b.textContent || '').trim() === text
+                                 && b.offsetParent !== null
+                        );
+                        if (btn) {
+                            btn.click();
+                            return { closed: true, text };
+                        }
+                    }
+                    // Icono X
+                    const x = modal.querySelector(
+                        '[aria-label*="cerrar" i], [aria-label*="close" i], button.close'
+                    );
+                    if (x) { x.click(); return { closed: true, text: 'X' }; }
+
+                    return { closed: false, hasModal: true };
+                }"""
+            )
+            if result.get("closed"):
+                print(f"  [Visa] Modal cerrado: '{result.get('text')}'")
+                return True
+        except Exception:
+            pass
+        return False
 
     async def _close_popup(self) -> None:
         for selector in [

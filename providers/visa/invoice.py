@@ -204,16 +204,18 @@ class InvoiceService:
         try:
             return await self.page.evaluate(
                 r"""(last4) => {
-                    // El header del portal (trigger dropit) muestra la tarjeta activa.
-                    // Formato: "| Banco \n TARJETA N°: XXXX XXXX XXXX NNNN"
-                    const HEADER_SELS = [
-                        '.user-info.grid-7.omega',
-                        '.user-info',
-                        '.header.container-12',
-                        'li.dropit-trigger',
+                    // Leer el numero de tarjeta activa desde el header del portal.
+                    // Estructura real (DevTools):
+                    //   div.user-card-number → "TARJETA N°: XXXX XXXX XXXX 3464"
+                    //   div#cardsDropDown    → "| Banco  TARJETA N°: XXXX 3464" (cerrado)
+                    //                       → "Seleccione otra tarjeta"         (abierto)
+                    const candidates = [
+                        document.querySelector('.user-card-number'),
+                        document.querySelector('#cardsDropDown'),
+                        document.querySelector('.user-info.grid-7.omega'),
+                        document.querySelector('.user-info'),
                     ];
-                    for (const sel of HEADER_SELS) {
-                        const el = document.querySelector(sel);
+                    for (const el of candidates) {
                         if (el && el.offsetParent !== null) {
                             const text = el.textContent || '';
                             if (text.includes(last4)) return true;
@@ -228,31 +230,53 @@ class InvoiceService:
 
     async def _open_card_selector(self) -> bool:
         """
-        Abre el panel lateral de seleccion de tarjeta.
+        Abre el dropdown de seleccion de tarjeta.
 
-        Mecanismo real del portal (confirmado por debug):
-        - Click en el header (.user-info.grid-7.omega) → los <li class="card-item clearfix">
-          pasan de display:none a visibles.
-        - NO es dropit.js (ese es para el menu 'Mas...' de navegacion superior).
-        - Despues del click verificamos que los LI son visibles para confirmar apertura.
+        Estructura real (confirmada con DevTools):
+          <div class="select-card" id="cardsDropDown" onclick="doOpenMenuCard()">
+            | Banco  TARJETA N°: XXXX 3464
+          </div>
+          <div id="cardContent" class="card-toggler-efect" style="display:none">
+            <ul class="card-dropdown-menu">
+              <li class="card-item clearfix">...</li>
+              ...
+            </ul>
+          </div>
+
+        Cuando el dropdown esta abierto:
+          - #cardsDropDown muestra 'Seleccione otra tarjeta' y tiene onclick="doCloseMenuCard()"
+          - #cardContent tiene style="display:block"
+          - los li.card-item.clearfix son visibles
         """
+        # Si ya esta abierto (cardContent visible), no hacer nada
+        try:
+            already_open = await self.page.locator('#cardContent').is_visible(timeout=300)
+            if already_open:
+                print("  [Visa] Panel de tarjetas ya estaba abierto.")
+                return True
+        except Exception:
+            pass
+
+        # Trigger: div#cardsDropDown (identificado por DevTools)
         trigger_selectors = [
-            '.user-info.grid-7.omega',   # header principal (banco + numero activo)
-            '.user-info',                 # fallback clase base
-            '.grid-5.box-right',          # seccion derecha del header
+            '#cardsDropDown',          # ID exacto del trigger
+            'div.select-card',         # clase del trigger
+            '.user-select-card-number div',  # contenedor del trigger
         ]
         for sel in trigger_selectors:
             try:
                 el = self.page.locator(sel).first
                 if await el.count() > 0 and await el.is_visible(timeout=500):
                     await el.click()
-                    await asyncio.sleep(0.4)
-                    # Verificar que el panel se abrio: li.card-item.clearfix visible
-                    li_visible = await self.page.locator('li.card-item.clearfix').first.is_visible(timeout=1000)
-                    if li_visible:
+                    await asyncio.sleep(0.5)
+                    # Verificar apertura: #cardContent visible o li.card-item.clearfix visible
+                    opened = await self.page.locator('#cardContent').is_visible(timeout=1000)
+                    if not opened:
+                        opened = await self.page.locator('li.card-item.clearfix').first.is_visible(timeout=500)
+                    if opened:
                         print(f"  [Visa] Panel de tarjetas abierto via ({sel})")
                         return True
-                    print(f"  [Visa] Click en {sel} pero LIs siguen ocultos, probando siguiente...")
+                    print(f"  [Visa] Click en {sel} pero panel no se abrio, probando siguiente...")
             except Exception:
                 pass
 
@@ -261,31 +285,47 @@ class InvoiceService:
 
     async def _click_card_in_dropdown(self, last4: str) -> None:
         """
-        Con el panel lateral abierto, clickea el li.card-item.clearfix que corresponde
-        a last4 usando Playwright (click real, no JS) ya que los LI son visibles.
-        """
-        lis = self.page.locator('li.card-item.clearfix')
-        count = await lis.count()
-        for i in range(count):
-            li = lis.nth(i)
-            try:
-                text = await li.text_content() or ''
-                if last4 not in text:
-                    continue
-                # Usar Playwright click (envia eventos reales de mouse)
-                await li.click()
-                print(f"  [Visa] Click en li.card-item.clearfix ****{last4}: {text.strip()[:60]!r}")
-                await asyncio.sleep(1.0)
-                try:
-                    await self.page.wait_for_load_state("networkidle", timeout=5000)
-                except Exception:
-                    pass
-                await dismiss_popups(self.page, label="visa-card-switch")
-                return
-            except Exception as e:
-                print(f"  [Visa] Error clickeando li {i}: {e}")
+        Con el panel abierto (#cardContent visible), clickea el li.card-item.clearfix
+        que corresponde a last4 usando Playwright (click real sobre elemento visible).
 
-        print(f"  [Visa] No se encontro li.card-item.clearfix con ****{last4} ({count} LIs encontrados).")
+        Estructura confirmada:
+          <div id="cardContent">
+            <ul class="card-dropdown-menu">
+              <li class="card-item clearfix">XXXX XXXX XXXX 3464 ...</li>
+              ...
+            </ul>
+          </div>
+        """
+        # Buscar dentro del dropdown abierto primero, luego fallback global
+        for locator_str in [
+            f'#cardContent li.card-item.clearfix',
+            f'ul.card-dropdown-menu li',
+            f'li.card-item.clearfix',
+        ]:
+            lis = self.page.locator(locator_str)
+            count = await lis.count()
+            if count == 0:
+                continue
+            for i in range(count):
+                li = lis.nth(i)
+                try:
+                    text = await li.text_content() or ''
+                    if last4 not in text:
+                        continue
+                    await li.click()
+                    print(f"  [Visa] Click en '{locator_str}' ****{last4}: {text.strip()[:60]!r}")
+                    await asyncio.sleep(1.0)
+                    try:
+                        await self.page.wait_for_load_state("networkidle", timeout=5000)
+                    except Exception:
+                        pass
+                    await dismiss_popups(self.page, label="visa-card-switch")
+                    return
+                except Exception as e:
+                    print(f"  [Visa] Error clickeando li[{i}]: {e}")
+            break  # Si habia LIs pero ninguno matcheo last4, no probar siguiente locator
+
+        print(f"  [Visa] No se encontro tarjeta ****{last4} en el dropdown.")
 
     async def _dump_card_selector_elements(self, last4: str) -> None:
         """Muestra los LI del selector de tarjetas que contienen los 4 digitos."""

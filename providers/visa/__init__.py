@@ -46,10 +46,14 @@ class VisaProvider:
     async def logout(self, page: Page, context: BrowserContext) -> None:
         """
         Cierra la sesion en mistarjetas.
-        Estrategia 1: click en el link "Cerrar sesion" del UI.
-        Estrategia 2: GET a las URLs de logout de Spring Security.
-        Estrategia 3: POST via JS fetch (fallback para j_spring_security_logout).
-        En todos los casos: borrar session file y verificar que la URL quede en el login.
+
+        Estrategia 1: click por JS en el link "Salir"/"Cerrar sesion" (aunque
+                      no sea visible por estar en un menu colapsado).
+        Estrategia 2: navegar a URLs de logout de Spring Security.
+        Estrategia 3: POST via JS fetch al endpoint de Spring Security.
+
+        En todos los casos: borrar session file y verificar que la URL quede
+        fuera del dominio del portal autenticado.
         """
         _LOGOUT_URLS = [
             "https://mistarjetas.prismamediosdepago.com/socios/app/logout",
@@ -57,11 +61,11 @@ class VisaProvider:
             "https://mistarjetas.prismamediosdepago.com/socios/j_spring_security_logout",
         ]
         try:
-            # 1. Buscar y clickear link de logout en el menu del portal
-            logged_out = await self._try_ui_logout(page)
+            # 1. Click por JS en el link de logout (bypassa is_visible)
+            logged_out = await self._try_ui_logout_js(page)
 
-            # 2. Si seguimos en el portal, navegar a la URL de logout
-            if not logged_out and "mistarjetas" in page.url:
+            # 2. Si seguimos en el portal autenticado, navegar a URLs de logout
+            if not logged_out and "mistarjetas" in page.url and "/app/" in page.url:
                 for logout_url in _LOGOUT_URLS:
                     try:
                         await page.goto(logout_url, timeout=8000)
@@ -70,17 +74,16 @@ class VisaProvider:
                         except Exception:
                             pass
                         current = page.url
-                        # Logout exitoso: el servidor redirige al dominio de login
-                        if "mycards" in current or "login" in current.lower():
-                            print(f"  [Visa] Logout confirmado: {logout_url}")
+                        if self._logout_succeeded(current):
+                            print(f"  [Visa] Logout confirmado: {logout_url} -> {current}")
                             logged_out = True
                             break
-                        print(f"  [Visa] {logout_url} -> {current} (sin redireccion a login)")
+                        print(f"  [Visa] {logout_url} -> {current} (sin redir a login)")
                     except Exception as e:
                         print(f"  [Visa] Error en {logout_url}: {e}")
                         continue
 
-            # 3. Fallback: POST via JavaScript fetch (Spring Security acepta POST en _logout)
+            # 3. Fallback: POST via JS fetch (Spring Security acepta POST)
             if not logged_out:
                 try:
                     result = await page.evaluate(
@@ -101,6 +104,13 @@ class VisaProvider:
                 except Exception as e:
                     print(f"  [Visa] Logout POST fallback fallo: {e}")
 
+            # Verificacion final: limpiar cookies de Spring por si el servidor no lo hizo
+            try:
+                await context.clear_cookies()
+                print("  [Visa] Cookies del browser limpiadas.")
+            except Exception:
+                pass
+
             print(f"  [Visa] Logout finalizado. URL: {page.url}")
 
         except Exception as e:
@@ -112,30 +122,84 @@ class VisaProvider:
                 sf.unlink()
                 print("  [Visa] Session file eliminado.")
 
-    async def _try_ui_logout(self, page: Page) -> bool:
-        """Busca y clickea el link 'Cerrar sesion' en el menu del portal."""
-        selectors = [
-            'a:has-text("Cerrar sesi\u00f3n")',   # con tilde
-            'a:has-text("Cerrar sesion")',           # sin tilde
-            'a:has-text("Salir")',
-            'button:has-text("Cerrar sesi\u00f3n")',
-            'a[href*="logout"]',
-            'a[href*="Logout"]',
-        ]
-        for sel in selectors:
+    @staticmethod
+    def _logout_succeeded(url: str) -> bool:
+        """El logout fue exitoso si salimos del dominio autenticado."""
+        u = (url or "").lower()
+        if "mycards" in u:
+            return True
+        if "login" in u:
+            return True
+        # Si seguimos en mistarjetas pero fuera de /app/ (p.ej. /socios/auth/...), ok
+        if "mistarjetas" in u and "/app/" not in u:
+            return True
+        return False
+
+    async def _try_ui_logout_js(self, page: Page) -> bool:
+        """
+        Busca y clickea el link de logout por JS. No requiere que sea visible:
+        usa .click() sobre elementos ocultos (comun en menus colapsados del portal).
+        """
+        try:
+            result = await page.evaluate(
+                r"""() => {
+                    const TEXTS = [
+                        'Cerrar sesión', 'Cerrar Sesión', 'Cerrar sesion',
+                        'CERRAR SESIÓN', 'CERRAR SESION',
+                        'Salir', 'SALIR', 'salir',
+                    ];
+                    // 1. Buscar por texto exacto (la prioridad)
+                    const anchors = Array.from(document.querySelectorAll('a, button'));
+                    for (const txt of TEXTS) {
+                        const el = anchors.find(a => (a.textContent || '').trim() === txt);
+                        if (el) {
+                            el.click();
+                            return { ok: true, via: 'text', text: txt,
+                                     href: el.getAttribute('href') || '' };
+                        }
+                    }
+                    // 2. Buscar por href con "logout"
+                    const byHref = anchors.find(a => {
+                        const h = (a.getAttribute('href') || '').toLowerCase();
+                        return h.includes('logout') || h.includes('j_spring_security_logout');
+                    });
+                    if (byHref) {
+                        byHref.click();
+                        return { ok: true, via: 'href',
+                                 href: byHref.getAttribute('href') || '',
+                                 text: (byHref.textContent || '').trim() };
+                    }
+                    return { ok: false };
+                }"""
+            )
+            if not result.get("ok"):
+                return False
+            print(f"  [Visa] Logout UI via JS: {result}")
             try:
-                el = page.locator(sel).first
-                if await el.count() > 0 and await el.is_visible(timeout=1000):
-                    await el.click()
-                    try:
-                        await page.wait_for_load_state("networkidle", timeout=8000)
-                    except Exception:
-                        pass
-                    print(f"  [Visa] Logout via UI ({sel}). URL: {page.url}")
-                    return True
+                await page.wait_for_load_state("networkidle", timeout=8000)
             except Exception:
                 pass
-        return False
+            # Si el click fue en un <a href="logout-url"> pero seguimos autenticados,
+            # forzar navegacion al href
+            if not self._logout_succeeded(page.url) and result.get("href"):
+                href = result["href"]
+                if not href.startswith("http"):
+                    href = "https://mistarjetas.prismamediosdepago.com" + (
+                        href if href.startswith("/") else "/" + href
+                    )
+                try:
+                    await page.goto(href, timeout=8000)
+                    await page.wait_for_load_state("networkidle", timeout=5000)
+                except Exception:
+                    pass
+            if self._logout_succeeded(page.url):
+                print(f"  [Visa] Logout UI confirmado. URL: {page.url}")
+                return True
+            print(f"  [Visa] Logout UI clickeado pero URL sigue: {page.url}")
+            return False
+        except Exception as e:
+            print(f"  [Visa] Logout UI JS fallo: {e}")
+            return False
 
 
 register("visa", VisaProvider)

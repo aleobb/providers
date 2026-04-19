@@ -22,37 +22,26 @@ async def dismiss_popups(page, *, label: str = "") -> int:
     Cierra modals/popups genericos que aparecen en cualquier portal
     (habilitacion de tarjetas, cookies, avisos legales, etc.).
 
-    Busca botones de cierre/rechazo y hace click en el primero visible.
+    Busca botones de cierre/rechazo ESPECIFICOS y hace click en el primero visible.
     Retorna la cantidad de popups cerrados.
+
+    IMPORTANTE: los selectores deben ser muy especificos. No usar patrones como
+    `button[class*="close"]` o `a:has-text("cerrar")` porque matchean botones de
+    navegacion normales (ej. dropit.js en el portal Visa crea menus con clases
+    tipo `*-layer` que seran interpretadas como modales).
     """
-    # Selectores ordenados de mas especifico a mas generico.
-    # Priorizamos "No", "Cancelar", "Cerrar" para NO confirmar nada accidentalmente.
     _DISMISS_SELECTORS = [
-        # Botones de cierre explicitos
+        # Botones de cierre con aria-label EXACTO (muy especifico)
         '[aria-label="Cerrar"]',
-        '[aria-label="cerrar"]',
         '[aria-label="Close"]',
-        'button[class*="close"]',
-        'button[class*="cerrar"]',
-        # Textos de rechazo/omision
+        # Textos muy especificos de popups/avisos (poco riesgo de falso positivo)
         'button:has-text("No, gracias")',
         'button:has-text("No gracias")',
         'button:has-text("Omitir")',
         'button:has-text("Saltar")',
-        'button:has-text("Cerrar")',
-        'button:has-text("cerrar")',
-        'a:has-text("Cerrar")',
-        'a:has-text("cerrar")',
-        'button:has-text("Cancelar")',
-        # "Entendido" es muy especifico de popups/avisos — poco riesgo de falso positivo
         'button:has-text("Entendido")',
         'button:has-text("entendido")',
-        # X tipico de modal
-        'button:text-is("x")',
-        'button:text-is("X")',
-        'button:text-is("×")',
-        'span:text-is("×")',
-        # Material / Bootstrap
+        # Material / Bootstrap estandar (scoped a contenedor de dialog)
         '.modal-header button.close',
         'mat-dialog-container button[mat-dialog-close]',
         '.cdk-overlay-container button[mat-dialog-close]',
@@ -62,11 +51,11 @@ async def dismiss_popups(page, *, label: str = "") -> int:
     for selector in _DISMISS_SELECTORS:
         try:
             el = page.locator(selector).first
-            if await el.count() > 0 and await el.is_visible(timeout=600):
+            if await el.count() > 0 and await el.is_visible(timeout=400):
                 tag = label or "popup"
                 print(f"  [dismiss] Cerrando {tag}: {selector}")
                 await el.click()
-                await asyncio.sleep(0.6)
+                await asyncio.sleep(0.4)
                 closed += 1
                 break  # un click por ronda; el caller puede llamar varias veces
         except Exception:

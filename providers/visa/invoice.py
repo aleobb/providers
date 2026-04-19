@@ -92,15 +92,13 @@ class InvoiceService:
         # Esto es critico para el segundo+ account: tras el resumen del primero
         # la URL sigue siendo mistarjetas pero el contenido no es el card-list.
         await self.page.goto(self.config.portal_url, timeout=self.config.timeout_ms)
-        await self.page.wait_for_load_state("networkidle", timeout=self.config.timeout_ms)
-        await asyncio.sleep(1)
-        # Cerrar popups (habilitacion de tarjetas, avisos legales, etc.) - hasta 3 rondas
-        for _ in range(3):
-            closed = await dismiss_popups(self.page, label="visa")
-            closed = closed or await self._close_visa_modal()
-            if not closed:
-                break
-            await asyncio.sleep(0.4)
+        try:
+            await self.page.wait_for_load_state("networkidle", timeout=8000)
+        except Exception:
+            pass
+        await asyncio.sleep(0.6)
+        # Un solo pase de dismiss_popups (los bucles generan loops visibles de scroll)
+        await dismiss_popups(self.page, label="visa")
 
     async def _navigate_to_resumen(self, account: Account) -> str:
         """
@@ -165,11 +163,18 @@ class InvoiceService:
 
         El portal tiene un boton "Seleccione otra tarjeta" que despliega una lista
         de <LI class="card-selection-div">.  Hay que:
-          1. Hacer click en "Seleccione otra tarjeta" para abrir el dropdown.
-          2. Esperar a que los LI queden visibles.
-          3. Hacer click en el LI que corresponde a los 4 digitos buscados.
+          1. Verificar si la tarjeta activa ya es la buscada (evita switch innecesario).
+          2. Hacer click en "Seleccione otra tarjeta" para abrir el dropdown.
+          3. Esperar a que los LI queden visibles.
+          4. Hacer click en el LI que corresponde a los 4 digitos buscados.
+          5. Verificar que el switch ocurrio (la tarjeta activa muestra los 4 digitos).
         """
         last4 = account.client_number
+
+        # Short-circuit: si la tarjeta activa ya es la buscada, no hace falta switchear
+        if await self._active_card_matches(last4):
+            print(f"  [Visa] Tarjeta activa ya es ****{last4} — sin switch.")
+            return
 
         # Abrir el selector
         opened = await self._open_card_selector()
@@ -177,61 +182,107 @@ class InvoiceService:
             print(f"  [Visa] Advertencia: no se pudo abrir el selector de tarjetas para ****{last4}.")
             return
 
-        await asyncio.sleep(1)
+        await asyncio.sleep(0.6)
 
         # Clickear el LI del selector
         await self._click_card_in_dropdown(last4)
 
+        # Verificar que el switch fue efectivo
+        for _ in range(10):  # hasta 5s
+            if await self._active_card_matches(last4):
+                print(f"  [Visa] Switch confirmado: tarjeta activa = ****{last4}.")
+                return
+            await asyncio.sleep(0.5)
+        print(f"  [Visa] Advertencia: no pude confirmar el switch a ****{last4}.")
+
+    async def _active_card_matches(self, last4: str) -> bool:
+        """
+        Devuelve True si la tarjeta activa del header del portal muestra los 4 digitos.
+
+        Lee el header especifico (clase 'user-info grid-7 omega') que dropit.js
+        usa como trigger y que cambia al hacer el switch. Evita falsos positivos
+        de banners laterales que muestran otras tarjetas.
+        """
+        try:
+            return await self.page.evaluate(
+                r"""(last4) => {
+                    // El header del portal (trigger dropit) muestra la tarjeta activa.
+                    // Formato: "| Banco \n TARJETA N°: XXXX XXXX XXXX NNNN"
+                    const HEADER_SELS = [
+                        '.user-info.grid-7.omega',
+                        '.user-info',
+                        '.header.container-12',
+                        'li.dropit-trigger',
+                    ];
+                    for (const sel of HEADER_SELS) {
+                        const el = document.querySelector(sel);
+                        if (el && el.offsetParent !== null) {
+                            const text = el.textContent || '';
+                            if (text.includes(last4)) return true;
+                        }
+                    }
+                    return false;
+                }""",
+                last4,
+            )
+        except Exception:
+            return False
+
     async def _open_card_selector(self) -> bool:
         """
-        Abre el dropdown 'Seleccione otra tarjeta'.
-        Intenta varios selectores (input button, div, span, a con ese texto).
+        Abre el dropdown de seleccion de tarjeta.
+
+        El portal Prisma usa dropit.js: el trigger es el header que muestra
+        el banco y el numero de la tarjeta activa (clase 'user-info grid-7 omega').
+        NO hay un boton con texto 'Seleccione otra tarjeta'.
         """
-        # Playwright text selectors y CSS
+        # 1. Playwright: clases conocidas del header / dropit trigger
         playwright_selectors = [
-            'input[value*="otra tarjeta"]',
-            'input[value*="Seleccione"]',
-            'button:has-text("Seleccione")',
-            'a:has-text("Seleccione otra tarjeta")',
-            'div:has-text("Seleccione otra tarjeta")',
-            ':text("Seleccione otra tarjeta")',
+            'li.dropit-trigger',               # dropit.js trigger estandar
+            '.user-info.grid-7.omega',          # header con banco + numero activo
+            '.grid-5.box-right',               # seccion derecha del header
+            'div.user-info',                    # fallback
         ]
         for sel in playwright_selectors:
             try:
                 el = self.page.locator(sel).first
                 if await el.count() > 0 and await el.is_visible(timeout=500):
                     await el.click()
-                    print(f"  [Visa] Selector de tarjetas abierto ({sel})")
+                    print(f"  [Visa] Dropdown abierto via ({sel})")
                     return True
             except Exception:
                 pass
 
-        # Fallback JS: buscar cualquier elemento visible con ese texto
+        # 2. JS: buscar LI con '|' como primer caracter (indicador de dropit trigger)
         result = await self.page.evaluate(
             r"""() => {
-                const texts = ['Seleccione otra tarjeta', 'otra tarjeta', 'Seleccione'];
-                const tags  = ['input', 'button', 'a', 'div', 'span', 'li'];
-                for (const t of texts) {
-                    for (const tag of tags) {
-                        const el = Array.from(document.querySelectorAll(tag)).find(e => {
-                            const v = (e.value || e.textContent || '').trim();
-                            return v.includes(t) && e.offsetParent !== null;
-                        });
-                        if (el) {
-                            el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-                            try { el.click(); } catch(e) {}
-                            return { ok: true, tag: el.tagName, text: (el.value || el.textContent || '').trim().substring(0, 40) };
-                        }
-                    }
+                // El trigger dropit.js tiene el caracter '|' al inicio del texto
+                const lis = Array.from(document.querySelectorAll('li'));
+                const trigger = lis.find(li =>
+                    li.offsetParent !== null &&
+                    (li.textContent || '').trimStart().startsWith('|')
+                );
+                if (trigger) {
+                    trigger.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                    try { trigger.click(); } catch(e) {}
+                    return { ok: true, tag: 'LI', cls: trigger.className,
+                             text: trigger.textContent.trim().substring(0, 50) };
+                }
+                // Fallback: el DIV .user-info (header con banco activo)
+                const uinfo = document.querySelector('.user-info');
+                if (uinfo && uinfo.offsetParent !== null) {
+                    uinfo.click();
+                    return { ok: true, tag: 'DIV', cls: uinfo.className,
+                             text: uinfo.textContent.trim().substring(0, 50) };
                 }
                 return { ok: false };
             }"""
         )
         if result.get("ok"):
-            print(f"  [Visa] Selector de tarjetas abierto via JS (<{result['tag']}> {result['text']!r})")
+            print(f"  [Visa] Dropdown abierto via JS (<{result['tag']}> cls={result.get('cls','')!r})")
             return True
 
-        print("  [Visa] No se encontro el boton 'Seleccione otra tarjeta'.")
+        print("  [Visa] No se pudo abrir el dropdown de tarjetas.")
         return False
 
     async def _click_card_in_dropdown(self, last4: str) -> None:
@@ -245,9 +296,11 @@ class InvoiceService:
 
         result = await self.page.evaluate(
             r"""(last4) => {
-                // Buscar LI de seleccion de tarjeta que contenga los 4 digitos
+                // Orden de preferencia: card-selection-div (dropdown), luego card-item (sidebar)
                 const selectors = [
                     'li.card-selection-div',
+                    'li.card-item',
+                    'li.card-item.clearfix',
                     'li[class*="card-selection"]',
                     'li[class*="card-item"]',
                 ];
@@ -257,17 +310,20 @@ class InvoiceService:
                     if (target) {
                         target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
                         try { target.click(); } catch(e) {}
-                        return { clicked: true, cls: target.className, text: target.textContent.trim().substring(0, 80) };
+                        return { clicked: true, cls: target.className,
+                                 text: target.textContent.trim().substring(0, 80) };
                     }
                 }
 
-                // Fallback: cualquier LI visible que contenga los 4 digitos
+                // Fallback: cualquier LI que contenga los 4 digitos (visible o no —
+                // en dropit.js los items del dropdown son hidden hasta que el trigger se abre)
                 const anyLi = Array.from(document.querySelectorAll('li'))
-                    .find(el => (el.textContent || '').includes(last4) && el.offsetParent !== null);
+                    .find(el => (el.textContent || '').includes(last4));
                 if (anyLi) {
                     anyLi.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
                     try { anyLi.click(); } catch(e) {}
-                    return { clicked: true, fallback: true, cls: anyLi.className, text: anyLi.textContent.trim().substring(0, 80) };
+                    return { clicked: true, fallback: true, cls: anyLi.className,
+                             text: anyLi.textContent.trim().substring(0, 80) };
                 }
 
                 return { clicked: false };
@@ -279,18 +335,13 @@ class InvoiceService:
             fb = " (fallback)" if result.get("fallback") else ""
             cls = result.get("cls", "")
             print(f"  [Visa] Tarjeta ****{last4} seleccionada{fb} (.{cls}): {result.get('text','')!r}")
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(1.0)
             try:
-                await self.page.wait_for_load_state("networkidle", timeout=8000)
+                await self.page.wait_for_load_state("networkidle", timeout=5000)
             except Exception:
                 pass
-            # Cerrar popups post-switch (habilitacion de tarjeta, avisos, etc.) - hasta 3 rondas
-            for _ in range(3):
-                closed = await dismiss_popups(self.page, label="visa-card-switch")
-                closed = closed or await self._close_visa_modal()
-                if not closed:
-                    break
-                await asyncio.sleep(0.4)
+            # Un solo pase de dismiss_popups (sin bucles que generen scroll loops)
+            await dismiss_popups(self.page, label="visa-card-switch")
         else:
             print(f"  [Visa] No se encontro LI para ****{last4} en el dropdown.")
             print(f"  [Visa] Se descargara la tarjeta activa en lugar de ****{last4}.")
@@ -326,26 +377,44 @@ class InvoiceService:
 
     async def _click_ver_resumen(self) -> bool:
         """
-        El portal de mistarjetas usa dropit.js: los items del submenu existen en el
-        DOM pero no son visibles hasta hacer hover. Usamos JS .click() para disparar
-        los event handlers de jQuery directamente, sin requerir visibilidad.
+        Navega a la pagina de resumen de la tarjeta activa.
+
+        En el portal Prisma el acceso al resumen puede ser:
+        - <button type='submit' class='button right white-button'>Ver resumen</button>
+        - <a href='#'>Ver Resumen completo</a>
+        - o items de submenu dropit (ocultos hasta hover)
+
+        Usamos Playwright primero (mas confiable para botones submit) y luego JS.
         """
-        # Textos posibles del link de resumen en el portal Prisma
+        # Textos posibles del boton/link de resumen
         _RESUMEN_TEXTS = [
+            "Ver resumen",
+            "Ver Resumen",
             "Resumen de Cuenta",
             "Resumen de cuenta",
-            "Ver Resumen",
-            "Ver resumen",
+            "Ver Resumen completo",
             "Resumen Digital",
             "Mi Resumen",
         ]
+
+        # 1. Playwright: buscar botones visibles (es un <button submit> en el dashboard)
+        for text in _RESUMEN_TEXTS:
+            for tag in ["button", "a"]:
+                try:
+                    el = self.page.locator(f'{tag}:has-text("{text}")').first
+                    if await el.count() > 0 and await el.is_visible(timeout=400):
+                        print(f"  [Visa] Click resumen via Playwright: <{tag}> '{text}'")
+                        await el.click()
+                        return True
+                except Exception:
+                    pass
+
+        # 2. JS: buscar en <a> y <button> (incluso ocultos — dropit submenu)
         clicked = await self.page.evaluate(
             """(texts) => {
-                const links = Array.from(document.querySelectorAll('a'));
+                const els = Array.from(document.querySelectorAll('a, button'));
                 for (const text of texts) {
-                    const target = links.find(
-                        a => a.textContent.trim() === text
-                    );
+                    const target = els.find(e => (e.textContent || '').trim() === text);
                     if (target) {
                         target.click();
                         return text;
@@ -385,70 +454,6 @@ class InvoiceService:
                     print(f"    <a href={href!r}> {text!r}")
         except Exception as e:
             print(f"  [Visa] No se pudieron leer links del resumen: {e}")
-
-    async def _close_visa_modal(self) -> bool:
-        """
-        Cierra modales/dialogs del portal Visa (habilitacion de tarjeta, avisos, etc.)
-        buscando botones de confirmacion DENTRO de un contenedor modal visible.
-        Solo clickea si hay un overlay/dialog en pantalla — evita clickear botones
-        de navegacion normales que comparten los mismos textos (Aceptar, Continuar, etc.).
-        """
-        try:
-            result = await self.page.evaluate(
-                r"""() => {
-                    // Contenedores tipicos de modal/dialog
-                    const MODAL_SELS = [
-                        '[role="dialog"]', '[role="alertdialog"]',
-                        '.modal-content', '.modal-body', '.modal',
-                        '[class*="modal"]', '[class*="dialog"]', '[class*="popup"]',
-                        '[class*="overlay"]', '[class*="layer"]',
-                    ];
-                    let modal = null;
-                    for (const sel of MODAL_SELS) {
-                        const els = document.querySelectorAll(sel);
-                        for (const el of els) {
-                            if (el.offsetParent !== null
-                                    && el.getBoundingClientRect().width > 50) {
-                                modal = el;
-                                break;
-                            }
-                        }
-                        if (modal) break;
-                    }
-                    if (!modal) return { closed: false };
-
-                    // Botones de cierre dentro del modal (orden: rechazo > confirmacion)
-                    const CLOSE_TEXTS = [
-                        'Cerrar', 'cerrar', 'No, gracias', 'No gracias',
-                        'Omitir', 'Cancelar', 'Entendido', 'Aceptar',
-                        'De acuerdo', 'OK', 'Continuar',
-                    ];
-                    const btns = Array.from(modal.querySelectorAll('button, a'));
-                    for (const text of CLOSE_TEXTS) {
-                        const btn = btns.find(
-                            b => (b.textContent || '').trim() === text
-                                 && b.offsetParent !== null
-                        );
-                        if (btn) {
-                            btn.click();
-                            return { closed: true, text };
-                        }
-                    }
-                    // Icono X
-                    const x = modal.querySelector(
-                        '[aria-label*="cerrar" i], [aria-label*="close" i], button.close'
-                    );
-                    if (x) { x.click(); return { closed: true, text: 'X' }; }
-
-                    return { closed: false, hasModal: true };
-                }"""
-            )
-            if result.get("closed"):
-                print(f"  [Visa] Modal cerrado: '{result.get('text')}'")
-                return True
-        except Exception:
-            pass
-        return False
 
     async def _close_popup(self) -> None:
         for selector in [
@@ -507,13 +512,15 @@ class InvoiceService:
         return None
 
     async def _click_download_button(self) -> None:
-        # Textos tipicos del portal viejo de Prisma para el link de descarga
+        # Textos del portal Prisma para el link de descarga (en orden de prioridad)
+        # Confirmado por dump: 'a:has-text("Descargar / Imprimir")' es el real
         candidates = [
+            'a:has-text("Descargar / Imprimir")',
+            'a:has-text("Descargar / imprimir")',
             'a:has-text("Descargar resumen")',
             'a:has-text("Descargar Resumen")',
             'a:has-text("Descargar")',
             'a:has-text("Descargar PDF")',
-            'a:has-text("Bajar resumen")',
             'a:has-text("PDF")',
             'a[href*="descargar"]',
             'a[href*="download"]',

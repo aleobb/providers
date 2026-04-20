@@ -13,6 +13,8 @@ ejecucion.log
 # Archivos de debug / screenshots
 *.png
 *.jpg
+visa_debug_dumps/
+visa_switch_test/
 
 # Python
 __pycache__/

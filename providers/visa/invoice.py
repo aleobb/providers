@@ -99,6 +99,76 @@ class InvoiceService:
         await asyncio.sleep(0.6)
         # Un solo pase de dismiss_popups (los bucles generan loops visibles de scroll)
         await dismiss_popups(self.page, label="visa")
+        # Popup especifico del portal: "Habilitá tus tarjetas" / "Habilitar tarjetas"
+        await self._dismiss_visa_popups()
+
+    async def _dismiss_visa_popups(self) -> None:
+        """
+        Cierra popups/modales especificos del portal Prisma que pueden bloquear
+        la interaccion (ej: 'Habilitá tus tarjetas', banner de novedades, etc).
+        Ejecuta todo en JS para evitar races con animaciones.
+        """
+        result = await self.page.evaluate(
+            r"""() => {
+                const log = [];
+                // 1) Modal 'Habilitar Tarjetas' / 'Habilitá tus tarjetas'
+                //    Suele ser un div con botones 'Cerrar', 'Más tarde', 'Omitir', etc.
+                const TEXTS_CLOSE = [
+                    'Más tarde', 'Mas tarde', 'Más Tarde',
+                    'Omitir', 'Saltar', 'Cerrar',
+                    'No, gracias', 'No gracias',
+                    'Ahora no', 'Recordarme más tarde',
+                    'Entendido', 'Aceptar y continuar'
+                ];
+                const clickables = Array.from(document.querySelectorAll('a, button, span, div'));
+                for (const el of clickables) {
+                    if (!(el.offsetParent)) continue;
+                    const t = (el.textContent || '').trim();
+                    if (TEXTS_CLOSE.includes(t) && t.length < 40) {
+                        try { el.click(); log.push('cerrado_texto:' + t); }
+                        catch (e) {}
+                    }
+                }
+                // 2) Cruz de cierre (X) en modales
+                const xBtns = Array.from(document.querySelectorAll(
+                    '[aria-label="Cerrar"], [aria-label="Close"], ' +
+                    '.modal .close, .modal-close, ' +
+                    '.popup .close, .popup-close, ' +
+                    'a.close-modal, button.close-modal, ' +
+                    'a[onclick*="close"], div[onclick*="close"]'
+                ));
+                for (const x of xBtns) {
+                    if (!x.offsetParent) continue;
+                    try { x.click(); log.push('cerrado_x:' + (x.className || x.tagName)); }
+                    catch (e) {}
+                }
+                // 3) Detectar si quedo algun overlay bloqueante
+                const blockers = Array.from(document.querySelectorAll('*'))
+                    .filter(el => {
+                        const s = window.getComputedStyle(el);
+                        const r = el.getBoundingClientRect();
+                        return (s.position === 'fixed')
+                            && el.offsetParent !== null
+                            && r.width > window.innerWidth * 0.5
+                            && r.height > window.innerHeight * 0.3
+                            && parseInt(s.zIndex || '0') > 100;
+                    })
+                    .slice(0, 3)
+                    .map(el => ({
+                        tag: el.tagName,
+                        cls: (el.className || '').substring(0, 60),
+                        text: (el.textContent || '').trim().substring(0, 80),
+                    }));
+                return { log, blockers };
+            }"""
+        )
+        if result.get("log"):
+            print(f"  [Visa] Popups cerrados: {result['log']}")
+        if result.get("blockers"):
+            print(f"  [Visa] Overlays residuales: {result['blockers']}")
+        # Pausa breve para que el modal termine de cerrarse
+        if result.get("log"):
+            await asyncio.sleep(0.5)
 
     async def _navigate_to_resumen(self, account: Account) -> str:
         """
@@ -176,17 +246,12 @@ class InvoiceService:
             print(f"  [Visa] Tarjeta activa ya es ****{last4} — sin switch.")
             return
 
-        # 1. Abrir el panel lateral de tarjetas (click en el header)
-        opened = await self._open_card_selector()
-        if not opened:
-            print(f"  [Visa] No se pudo abrir el panel de tarjetas para ****{last4}.")
-            return
-
-        # 2. Clickear el li.card-item.clearfix correcto con Playwright (ya es visible)
+        # changeCard(token) funciona aunque el dropdown este cerrado: los <li>
+        # existen en DOM igual (solo con display:none). Skipeamos abrir el panel.
         await self._click_card_in_dropdown(last4)
 
-        # 3. Verificar que el switch ocurrio
-        for _ in range(10):  # hasta 5s
+        # Verificar que el switch ocurrio
+        for _ in range(12):  # hasta 6s
             if await self._active_card_matches(last4):
                 print(f"  [Visa] Switch confirmado: tarjeta activa = ****{last4}.")
                 return
@@ -195,36 +260,36 @@ class InvoiceService:
 
     async def _active_card_matches(self, last4: str) -> bool:
         """
-        Devuelve True si la tarjeta activa del header del portal muestra los 4 digitos.
+        Devuelve True si la tarjeta activa del header muestra los 4 digitos.
 
-        Lee el header especifico (clase 'user-info grid-7 omega') que dropit.js
-        usa como trigger y que cambia al hacer el switch. Evita falsos positivos
-        de banners laterales que muestran otras tarjetas.
+        CRITICO: NO usar .user-info.grid-7.omega ni similares — esos contenedores
+        incluyen <script> con los 12 tokens que contienen todos los last4, causando
+        falsos positivos para cualquier tarjeta.
+
+        Usa el <span> visible con patron "XXXX XXXX XXXX NNNN" FUERA de #cardContent
+        (el panel de seleccion). Ese span es unico y corresponde a la tarjeta activa.
         """
         try:
-            return await self.page.evaluate(
-                r"""(last4) => {
-                    // Leer el numero de tarjeta activa desde el header del portal.
-                    // Estructura real (DevTools):
-                    //   div.user-card-number → "TARJETA N°: XXXX XXXX XXXX 3464"
-                    //   div#cardsDropDown    → "| Banco  TARJETA N°: XXXX 3464" (cerrado)
-                    //                       → "Seleccione otra tarjeta"         (abierto)
-                    const candidates = [
-                        document.querySelector('.user-card-number'),
-                        document.querySelector('#cardsDropDown'),
-                        document.querySelector('.user-info.grid-7.omega'),
-                        document.querySelector('.user-info'),
-                    ];
-                    for (const el of candidates) {
-                        if (el && el.offsetParent !== null) {
-                            const text = el.textContent || '';
-                            if (text.includes(last4)) return true;
+            active = await self.page.evaluate(
+                r"""() => {
+                    const spans = Array.from(document.querySelectorAll('span'));
+                    for (const s of spans) {
+                        if (!s.offsetParent) continue;
+                        // Excluir cualquier span dentro de #cardContent (panel de seleccion)
+                        let p = s;
+                        let inPanel = false;
+                        while (p) {
+                            if (p.id === 'cardContent') { inPanel = true; break; }
+                            p = p.parentElement;
                         }
+                        if (inPanel) continue;
+                        const m = (s.textContent || '').match(/XXXX\s+XXXX\s+XXXX\s+(\d{4})/);
+                        if (m) return m[1];
                     }
-                    return false;
-                }""",
-                last4,
+                    return null;
+                }"""
             )
+            return active == last4
         except Exception:
             return False
 
@@ -285,22 +350,69 @@ class InvoiceService:
 
     async def _click_card_in_dropdown(self, last4: str) -> None:
         """
-        Con el panel abierto (#cardContent visible), clickea el li.card-item.clearfix
-        que corresponde a last4 usando Playwright (click real sobre elemento visible).
+        Cambia la tarjeta activa llamando directamente a la funcion JSF del portal.
 
-        Estructura confirmada:
-          <div id="cardContent">
-            <ul class="card-dropdown-menu">
-              <li class="card-item clearfix">XXXX XXXX XXXX 3464 ...</li>
-              ...
-            </ul>
-          </div>
+        Estructura confirmada por debug dump:
+          <li class="card-item clearfix"
+              onclick="changeCard('<token_base64>')">
+            ...XXXX XXXX XXXX 3464...
+          </li>
+
+        `changeCard(token)` es una funcion global que setea el hidden input
+        `header:cardSelectorFrm:selectedCardHidden` y submit-ea el form JSF
+        `header:cardSelectorFrm`. La pagina recarga con la tarjeta nueva activa.
+
+        Estrategia preferida: leer el onclick del LI correcto y ejecutar
+        directamente `changeCard(token)`. Fallback: Playwright click sobre el LI.
         """
-        # Buscar dentro del dropdown abierto primero, luego fallback global
+        # 1) Preferente: extraer token del onclick y llamar changeCard(token)
+        call_result = await self.page.evaluate(
+            r"""(last4) => {
+                const lis = Array.from(document.querySelectorAll('li.card-item.clearfix'));
+                const target = lis.find(li => (li.textContent || '').includes(last4));
+                if (!target) return { ok: false, reason: 'no_li_match' };
+                const oc = target.getAttribute('onclick') || '';
+                // onclick = "changeCard('TOKEN')"
+                const m = oc.match(/changeCard\(\s*['"]([^'"]+)['"]\s*\)/);
+                if (m && typeof window.changeCard === 'function') {
+                    try {
+                        window.changeCard(m[1]);
+                        return { ok: true, via: 'changeCard', token: m[1].substring(0, 20) + '...' };
+                    } catch (e) {
+                        return { ok: false, reason: 'changeCard_err:' + e.message };
+                    }
+                }
+                // Fallback: ejecutar el onclick raw
+                if (oc) {
+                    try {
+                        (new Function(oc)).call(target);
+                        return { ok: true, via: 'onclick_raw' };
+                    } catch (e) {
+                        return { ok: false, reason: 'onclick_err:' + e.message };
+                    }
+                }
+                return { ok: false, reason: 'sin_onclick' };
+            }""",
+            last4,
+        )
+        print(f"  [Visa] changeCard({last4}): {call_result}")
+
+        if call_result.get("ok"):
+            # El form submit hace una navegacion — esperar recarga del dashboard
+            try:
+                await self.page.wait_for_load_state("networkidle", timeout=10000)
+            except Exception:
+                pass
+            await asyncio.sleep(0.8)
+            await dismiss_popups(self.page, label="visa-card-switch")
+            return
+
+        # 2) Fallback: Playwright click sobre el LI (por si la estructura cambio)
+        print(f"  [Visa] Fallback a Playwright click...")
         for locator_str in [
-            f'#cardContent li.card-item.clearfix',
-            f'ul.card-dropdown-menu li',
-            f'li.card-item.clearfix',
+            '#cardContent li.card-item.clearfix',
+            'ul.card-dropdown-menu li.card-item',
+            'li.card-item.clearfix',
         ]:
             lis = self.page.locator(locator_str)
             count = await lis.count()
@@ -312,20 +424,18 @@ class InvoiceService:
                     text = await li.text_content() or ''
                     if last4 not in text:
                         continue
-                    await li.click()
-                    print(f"  [Visa] Click en '{locator_str}' ****{last4}: {text.strip()[:60]!r}")
-                    await asyncio.sleep(1.0)
+                    await li.click(timeout=3000, force=True)
+                    print(f"  [Visa] Click Playwright '{locator_str}' ****{last4}")
                     try:
-                        await self.page.wait_for_load_state("networkidle", timeout=5000)
+                        await self.page.wait_for_load_state("networkidle", timeout=10000)
                     except Exception:
                         pass
-                    await dismiss_popups(self.page, label="visa-card-switch")
+                    await asyncio.sleep(0.8)
+                    await dismiss_popups(self.page, label="visa-card-switch-pw")
                     return
                 except Exception as e:
-                    print(f"  [Visa] Error clickeando li[{i}]: {e}")
-            break  # Si habia LIs pero ninguno matcheo last4, no probar siguiente locator
-
-        print(f"  [Visa] No se encontro tarjeta ****{last4} en el dropdown.")
+                    print(f"  [Visa] Playwright click error li[{i}]: {e}")
+            break
 
     async def _dump_card_selector_elements(self, last4: str) -> None:
         """Muestra los LI del selector de tarjetas que contienen los 4 digitos."""

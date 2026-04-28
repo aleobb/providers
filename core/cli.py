@@ -116,7 +116,7 @@ async def run_provider(
                 path, err = await _download_one(provider, service_page, service_context, account)
                 if path:
                     print(f"  OK: {path.resolve()}")
-                    period = _extract_period(path)
+                    period = _determine_period(path, provider.name)
                     run_log.log_ok(provider.name, account.client_number, period, path)
                     if drive_uploader and drive_root_id:
                         banco = account.extra.get("banco", "") if account.extra else ""
@@ -144,7 +144,7 @@ async def run_provider(
         print("Descargando ultima factura...")
         pdf_path = await provider.download_invoice(service_page, service_context, account)
         print(f"\nFactura descargada: {pdf_path.resolve()}")
-        period = _extract_period(pdf_path)
+        period = _determine_period(pdf_path, provider.name)
         run_log.log_ok(provider.name, account.client_number, period, pdf_path)
         if drive_uploader and drive_root_id:
             banco = account.extra.get("banco", "") if account.extra else ""
@@ -164,12 +164,34 @@ async def run_provider(
 def _extract_period(path: Path) -> str:
     """Extrae el período del nombre del archivo. Devuelve YYYY-MM-DD o YYYY-MM."""
     import re
-    # Intentar fecha completa primero (ej. mastercard_2026-03-15_xxxx_resumen.pdf)
     m = re.search(r"(\d{4}-\d{2}-\d{2})", path.name)
     if m:
         return m.group(1)
     m = re.search(r"(\d{4}-\d{2})", path.name)
     return m.group(1) if m else "-"
+
+
+def _determine_period(path: Path, provider_name: str) -> str:
+    """
+    Determina el período del documento intentando leer el PDF con pdfplumber.
+
+    - Éxito  → YYYY-MM-DD extraído del contenido del PDF.
+    - Fallo  → período del nombre del archivo + '_pdf_read_error'
+               (señal visible en el nombre del archivo en Drive).
+    """
+    try:
+        from .pdf_extractor import extract_invoice_date
+        date = extract_invoice_date(path, provider_name)
+        if date:
+            return date
+    except Exception:
+        pass
+
+    # Fallback: nombre de archivo + marcador de error
+    period = _extract_period(path)
+    if period == "-":
+        return "sin_fecha_pdf_read_error"
+    return f"{period}_pdf_read_error"
 
 
 def _upload_to_drive(

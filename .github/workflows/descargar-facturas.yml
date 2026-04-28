@@ -1,0 +1,83 @@
+name: Descargar Facturas
+
+on:
+  schedule:
+    # Día 5 de cada mes a las 12:00 UTC (09:00 Argentina)
+    - cron: '0 12 5 * *'
+  workflow_dispatch:
+    inputs:
+      proveedor:
+        description: 'Proveedor específico (edenor, metrogas, visa, etc.) — dejar vacío para todos'
+        required: false
+        default: ''
+
+jobs:
+  descargar:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Clonar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Instalar dependencias Python
+        run: pip install -r requirements.txt
+
+      - name: Instalar Chrome (Playwright)
+        run: playwright install chrome --with-deps
+
+      - name: Ejecutar descargador (todos los proveedores)
+        if: github.event.inputs.proveedor == ''
+        env:
+          EDENOR_EMAIL:            ${{ secrets.EDENOR_EMAIL }}
+          EDENOR_PASSWORD:         ${{ secrets.EDENOR_PASSWORD }}
+          METROGAS_EMAIL:          ${{ secrets.METROGAS_EMAIL }}
+          METROGAS_PASSWORD:       ${{ secrets.METROGAS_PASSWORD }}
+          EDESUR_EMAIL:            ${{ secrets.EDESUR_EMAIL }}
+          EDESUR_PASSWORD:         ${{ secrets.EDESUR_PASSWORD }}
+          TELECENTRO_EMAIL:        ${{ secrets.TELECENTRO_EMAIL }}
+          TELECENTRO_PASSWORD:     ${{ secrets.TELECENTRO_PASSWORD }}
+          CLARO_EMAIL:             ${{ secrets.CLARO_EMAIL }}
+          CLARO_PASSWORD:          ${{ secrets.CLARO_PASSWORD }}
+          VISA_DOCUMENTO_NACIONAL_DE_IDENTIDAD: ${{ secrets.VISA_DNI }}
+          VISA_USUARIO:            ${{ secrets.VISA_USUARIO }}
+          VISA_PASSWORD:           ${{ secrets.VISA_PASSWORD }}
+          VISA_TITULAR:            ${{ secrets.VISA_TITULAR }}
+          MASTERCARD_EMAIL:        ${{ secrets.MASTERCARD_EMAIL }}
+          MASTERCARD_PASSWORD:     ${{ secrets.MASTERCARD_PASSWORD }}
+        run: python main.py --todos-proveedores --todas
+
+      - name: Ejecutar descargador (proveedor específico)
+        if: github.event.inputs.proveedor != ''
+        env:
+          EDENOR_EMAIL:            ${{ secrets.EDENOR_EMAIL }}
+          EDENOR_PASSWORD:         ${{ secrets.EDENOR_PASSWORD }}
+          METROGAS_EMAIL:          ${{ secrets.METROGAS_EMAIL }}
+          METROGAS_PASSWORD:       ${{ secrets.METROGAS_PASSWORD }}
+          EDESUR_EMAIL:            ${{ secrets.EDESUR_EMAIL }}
+          EDESUR_PASSWORD:         ${{ secrets.EDESUR_PASSWORD }}
+          TELECENTRO_EMAIL:        ${{ secrets.TELECENTRO_EMAIL }}
+          TELECENTRO_PASSWORD:     ${{ secrets.TELECENTRO_PASSWORD }}
+          CLARO_EMAIL:             ${{ secrets.CLARO_EMAIL }}
+          CLARO_PASSWORD:          ${{ secrets.CLARO_PASSWORD }}
+          VISA_DOCUMENTO_NACIONAL_DE_IDENTIDAD: ${{ secrets.VISA_DNI }}
+          VISA_USUARIO:            ${{ secrets.VISA_USUARIO }}
+          VISA_PASSWORD:           ${{ secrets.VISA_PASSWORD }}
+          VISA_TITULAR:            ${{ secrets.VISA_TITULAR }}
+          MASTERCARD_EMAIL:        ${{ secrets.MASTERCARD_EMAIL }}
+          MASTERCARD_PASSWORD:     ${{ secrets.MASTERCARD_PASSWORD }}
+        run: python main.py --proveedor ${{ github.event.inputs.proveedor }} --todas
+
+      - name: Subir facturas como artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: facturas-${{ github.run_id }}
+          path: facturas/
+          if-no-files-found: warn
+          retention-days: 90

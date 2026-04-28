@@ -660,9 +660,29 @@ class InvoiceService:
     # ------------------------------------------------------------------ helpers
 
     async def _extract_period(self) -> str:
-        """Extrae el periodo del resumen (YYYY-MM) desde el texto de la pagina."""
+        """
+        Extrae el período del resumen desde el texto de la página.
+
+        Intenta obtener YYYY-MM-DD (fecha de cierre completa) buscando patrones
+        del tipo "Fecha de Cierre: DD/MM/YYYY" o "F. Cierre DD-MM-YYYY".
+        Si no la encuentra, cae a YYYY-MM.
+        """
         try:
             text = await self.page.inner_text("body")
+
+            # --- Intentar fecha de cierre completa (DD/MM/YYYY o DD-MM-YYYY) ---
+            cierre_patterns = [
+                r'fecha\s+de\s+cierre\s*[:\-]?\s*(\d{2})[/\-](\d{2})[/\-](\d{4})',
+                r'f\.?\s*cierre\s*[:\-]?\s*(\d{2})[/\-](\d{2})[/\-](\d{4})',
+                r'cierre\s*[:\-]\s*(\d{2})[/\-](\d{2})[/\-](\d{4})',
+            ]
+            for pat in cierre_patterns:
+                m = re.search(pat, text, re.IGNORECASE)
+                if m:
+                    day, month, year = m.group(1), m.group(2), m.group(3)
+                    return f"{year}-{month}-{day}"
+
+            # --- Fallback: nombre de mes + año ---
             meses = {
                 'enero': '01', 'febrero': '02', 'marzo': '03', 'abril': '04',
                 'mayo': '05', 'junio': '06', 'julio': '07', 'agosto': '08',

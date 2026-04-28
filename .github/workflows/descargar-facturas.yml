@@ -50,6 +50,10 @@ jobs:
           VISA_TITULAR:            ${{ secrets.VISA_TITULAR }}
           MASTERCARD_EMAIL:        ${{ secrets.MASTERCARD_EMAIL }}
           MASTERCARD_PASSWORD:     ${{ secrets.MASTERCARD_PASSWORD }}
+          GOOGLE_DRIVE_FOLDER_ID:  ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          VISA_BANCO:              ${{ secrets.VISA_BANCO }}
+          MASTERCARD_BANCO:        ${{ secrets.MASTERCARD_BANCO }}
         run: python main.py --todos-proveedores --todas
 
       - name: Ejecutar descargador (proveedor específico)
@@ -71,6 +75,10 @@ jobs:
           VISA_TITULAR:            ${{ secrets.VISA_TITULAR }}
           MASTERCARD_EMAIL:        ${{ secrets.MASTERCARD_EMAIL }}
           MASTERCARD_PASSWORD:     ${{ secrets.MASTERCARD_PASSWORD }}
+          GOOGLE_DRIVE_FOLDER_ID:  ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          VISA_BANCO:              ${{ secrets.VISA_BANCO }}
+          MASTERCARD_BANCO:        ${{ secrets.MASTERCARD_BANCO }}
         run: python main.py --proveedor ${{ github.event.inputs.proveedor }} --todas
 
       - name: Subir facturas como artifacts

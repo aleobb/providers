@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -64,6 +65,8 @@ async def run_provider(
     listar: bool,
     todas: bool,
     cuenta: str | None,
+    drive_uploader=None,
+    drive_root_id: str = "",
 ) -> bool:
     """Run a single provider. Returns True on full success."""
     config = provider.get_config()
@@ -115,6 +118,9 @@ async def run_provider(
                     print(f"  OK: {path.resolve()}")
                     period = _extract_period(path)
                     run_log.log_ok(provider.name, account.client_number, period, path)
+                    if drive_uploader and drive_root_id:
+                        banco = account.extra.get("banco", "") if account.extra else ""
+                        _upload_to_drive(drive_uploader, drive_root_id, provider.name, period, path, banco)
                     results.append((account, path, None))
                 else:
                     print(f"  ERROR: {err}", file=sys.stderr)
@@ -140,6 +146,9 @@ async def run_provider(
         print(f"\nFactura descargada: {pdf_path.resolve()}")
         period = _extract_period(pdf_path)
         run_log.log_ok(provider.name, account.client_number, period, pdf_path)
+        if drive_uploader and drive_root_id:
+            banco = account.extra.get("banco", "") if account.extra else ""
+            _upload_to_drive(drive_uploader, drive_root_id, provider.name, period, pdf_path, banco)
         return True
 
       finally:
@@ -153,10 +162,38 @@ async def run_provider(
 
 
 def _extract_period(path: Path) -> str:
-    """Extrae el período (YYYY-MM) del nombre del archivo si está presente."""
+    """Extrae el período del nombre del archivo. Devuelve YYYY-MM-DD o YYYY-MM."""
     import re
+    # Intentar fecha completa primero (ej. mastercard_2026-03-15_xxxx_resumen.pdf)
+    m = re.search(r"(\d{4}-\d{2}-\d{2})", path.name)
+    if m:
+        return m.group(1)
     m = re.search(r"(\d{4}-\d{2})", path.name)
     return m.group(1) if m else "-"
+
+
+def _upload_to_drive(
+    uploader,
+    root_folder_id: str,
+    provider_name: str,
+    period: str,
+    path: Path,
+    banco: str = "",
+) -> None:
+    """Sube el PDF a Drive. Silencia errores para no interrumpir el flujo principal."""
+    try:
+        from .drive_naming import get_drive_target
+        target = get_drive_target(provider_name, period, banco=banco)
+        file_id = uploader.upload_to_path(
+            path, root_folder_id, target.subfolder_parts, target.filename
+        )
+        drive_path = "/".join(target.subfolder_parts + [target.filename])
+        if file_id:
+            print(f"  Drive: {drive_path} ✓")
+        else:
+            print(f"  Drive: {drive_path} (ya existía)")
+    except Exception as e:
+        print(f"  [Drive] Error al subir {path.name}: {e}", file=sys.stderr)
 
 
 async def run(
@@ -190,13 +227,29 @@ async def run(
     if debug:
         print("[DEBUG] Modo headless desactivado - el browser sera visible.")
 
+    # Inicializar Google Drive uploader si las credenciales están configuradas
+    drive_uploader = None
+    drive_root_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "").strip()
+    if drive_root_id and os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip():
+        try:
+            from .drive import DriveUploader
+            drive_uploader = DriveUploader()
+            print(f"[Drive] Uploader iniciado. Carpeta raíz: {drive_root_id}")
+        except Exception as e:
+            print(f"[Drive] No se pudo inicializar el uploader: {e}", file=sys.stderr)
+            drive_uploader = None
+
     if not listar:
         run_log.log_run_start([p.name for p in providers])
 
     all_ok = True
     for provider in providers:
         try:
-            ok = await run_provider(provider, debug, listar, todas, cuenta)
+            ok = await run_provider(
+                provider, debug, listar, todas, cuenta,
+                drive_uploader=drive_uploader,
+                drive_root_id=drive_root_id,
+            )
             if not ok:
                 all_ok = False
         except ServerUnavailableError as e:

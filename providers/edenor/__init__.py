@@ -23,6 +23,9 @@ class EdenorProvider:
         self._interceptor = NetworkInterceptor()
         self._page: Page | None = None
         self._context: BrowserContext | None = None
+        # Credenciales de sesión guardada (path sin browser)
+        self._saved_cookies: dict | None = None
+        self._saved_token: str | None = None
 
     def get_config(self) -> EdenorConfig:
         return self._config
@@ -33,15 +36,12 @@ class EdenorProvider:
         await self._interceptor.start(page)
         orchestrator = LoginOrchestrator(page, self._config)
         await orchestrator.execute()
-        await page.wait_for_load_state("networkidle", timeout=self._config.timeout_ms)
         await asyncio.sleep(3)
 
-        # Navigate to resumen to load bill data and download button
         await page.goto(
             f"{self._config.base_url}/cuentas/resumen",
             timeout=self._config.timeout_ms,
         )
-        await page.wait_for_load_state("networkidle", timeout=self._config.timeout_ms)
         await asyncio.sleep(4)
 
     async def fetch_accounts(self, page: Page, context: BrowserContext) -> list[Account]:
@@ -50,11 +50,69 @@ class EdenorProvider:
     async def download_invoice(
         self, page: Page, context: BrowserContext, account: Account
     ) -> Path:
-        service = InvoiceService(context, page, self._interceptor, self._config)
+        """
+        Descarga la factura más reciente.
+        page/context pueden ser None cuando se restaura desde sesión guardada:
+        en ese caso usa las credenciales en self._saved_cookies / self._saved_token.
+        """
+        if page is None:
+            service = InvoiceService(
+                None, None, None, self._config,
+                saved_cookies=self._saved_cookies,
+                saved_token=self._saved_token,
+            )
+        else:
+            service = InvoiceService(context, page, self._interceptor, self._config)
         return await service.download_latest(
             account_id=account.extra["id"],
             client_number=account.client_number,
         )
+
+    # ─── Session store ────────────────────────────────────────────────────────
+
+    async def try_resume_session(self, data: dict) -> list[Account] | None:
+        """
+        Valida sesión guardada haciendo un probe al endpoint de cuentas.
+        Si responde 2xx, restaura credenciales y devuelve cuentas.
+        """
+        from core import session_store
+        auth_token = data.get("auth_token", "")
+        cookies = data.get("cookies", {})
+        accounts = session_store.accounts_from_list(data.get("accounts", []))
+        if not accounts or not auth_token:
+            return None
+
+        headers = {
+            "Authorization": auth_token,
+            "utility-id": "19",
+            "channel": "web",
+            "Accept": "application/json",
+        }
+        valid = await session_store.probe(
+            f"{self._config.api_base}/accounts",
+            headers=headers,
+            cookies=cookies,
+        )
+        if not valid:
+            return None
+
+        self._saved_token = auth_token.removeprefix("Bearer ").strip()
+        self._saved_cookies = cookies
+        print("  [Edenor] Sesión válida — sin browser.")
+        return accounts
+
+    async def save_session(
+        self, page: Page, context: BrowserContext, accounts: list[Account]
+    ) -> None:
+        """Guarda token + cookies + cuentas para la próxima ejecución."""
+        from core import session_store
+        cookies = {c["name"]: c["value"] for c in await context.cookies()}
+        session_store.save(self.name, {
+            "auth_token": self._interceptor.auth_token or "",
+            "cookies": cookies,
+            "accounts": session_store.accounts_to_list(accounts),
+        })
+        print("  [Edenor] Sesión guardada.")
 
 
 register("edenor", EdenorProvider)

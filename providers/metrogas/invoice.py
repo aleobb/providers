@@ -13,6 +13,26 @@ from .config import MetrogasConfig
 _INVOICE_API_PATH = "/sap/fiori/ovcustdashboard//OvServiceHub/api/v1/M360/invoice/isu/lastInvoice/"
 
 
+def _is_pdf_response(response: httpx.Response) -> bool:
+    return 200 <= response.status_code < 300 and b"%PDF-" in response.content[:1024]
+
+
+def _validated_pdf_content(response: httpx.Response, client_number: str) -> bytes:
+    if response.status_code >= 400:
+        raise DownloadError(
+            f"HTTP {response.status_code} al descargar factura para cliente {client_number}"
+        )
+    if not _is_pdf_response(response):
+        content_type = response.headers.get("content-type", "desconocido")
+        raise DownloadError(
+            f"Respuesta no es una factura PDF para cliente {client_number} "
+            f"(HTTP {response.status_code}, content-type: {content_type}, "
+            f"size: {len(response.content)} bytes). "
+            "La sesión puede haber expirado; reintentar autenticación."
+        )
+    return response.content
+
+
 class InvoiceService:
     def __init__(self, page: Page, config: MetrogasConfig):
         self.page = page
@@ -39,11 +59,7 @@ class InvoiceService:
             cookies=cookies, follow_redirects=True, timeout=60, verify=False
         ) as client:
             r = await client.get(pdf_url)
-            if r.status_code >= 400:
-                raise DownloadError(
-                    f"HTTP {r.status_code} al descargar factura para cliente {client_number}"
-                )
-            dest_path.write_bytes(r.content)
+            dest_path.write_bytes(_validated_pdf_content(r, client_number))
 
         return dest_path
 

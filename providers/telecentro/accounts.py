@@ -8,9 +8,11 @@ from .config import TelecentroConfig
 
 
 async def fetch_accounts(page: Page, config: TelecentroConfig, jwt: str) -> list[Account]:
-    """Obtiene todas las cuentas vinculadas al email del usuario via API REST."""
-    email = config.email
-
+    """
+    Obtiene todas las cuentas vinculadas al email via API REST.
+    El endpoint acepta el email como query param, pero tambien lo deduce del JWT.
+    No usa el browser (page se ignora, se mantiene por compatibilidad con el Protocol).
+    """
     headers = {
         "Authorization": f"Bearer {jwt}",
         "Content-Type": "application/json",
@@ -20,7 +22,8 @@ async def fetch_accounts(page: Page, config: TelecentroConfig, jwt: str) -> list
         headers=headers, follow_redirects=True, timeout=30, verify=False
     ) as client:
         r = await client.get(
-            f"{config.api_base}/bss/vta/clientes/v1/byEmail?email={email}"
+            f"{config.api_base}/bss/vta/clientes/v1/byEmail",
+            params={"email": config.email},
         )
         r.raise_for_status()
         data = r.json()

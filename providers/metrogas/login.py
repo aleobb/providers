@@ -45,8 +45,9 @@ class LoginOrchestrator:
         try:
             email_input = self.page.locator("#j_username, input[name='j_username']").first
             await email_input.wait_for(state="visible", timeout=self.config.timeout_ms)
-            await email_input.click()
-            await self.page.keyboard.type(self.config.email, delay=50)
+            current_email = (await email_input.input_value()).strip()
+            if current_email != self.config.email:
+                await email_input.fill(self.config.email)
         except PlaywrightTimeout as e:
             raise LoginError("No se encontró el campo de email") from e
 

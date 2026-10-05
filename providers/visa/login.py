@@ -8,13 +8,49 @@ from playwright.async_api import BrowserContext, Page, TimeoutError as Playwrigh
 from core.exceptions import LoginError, NavigationError, ServerUnavailableError
 from .config import VisaConfig
 
-_LOGIN_PAGE = "https://mycards.prismamediosdepago.com/"
+_LOGIN_PAGE = "https://mis-tarjetas.prismamediosdepago.com/"
 
-# Selectores del formulario de login
+# Selectores del formulario de login.
+# El portal Prisma migró a un frontend React/Next.js y los campos ya no vienen
+# exclusivamente con los IDs legacy. Soportamos ambos formatos.
 _SEL_DOC_TYPE = 'select#documentType'
 _SEL_NUMERO   = '#documentNumber'
 _SEL_USUARIO  = '#username'
 _SEL_PASSWORD = '#password'
+
+_SELECTOR_GROUPS = {
+    "documentType": [
+        'select#documentType',
+        'select[name="documentType"]',
+        '[name="documentType"]',
+    ],
+    "documentNumber": [
+        '#documentNumber',
+        'input[name="documentNumber"]',
+        'input[id*="documentNumber"]',
+        '[name="documentNumber"]',
+    ],
+    "username": [
+        '#username',
+        'input[name="username"]',
+        'input[id*="username"]',
+        '[name="username"]',
+    ],
+    "password": [
+        '#password',
+        'input[name="password"]',
+        'input[id*="password"]',
+        '[name="password"]',
+    ],
+    "code": [
+        'input[name="code"]',
+        'input[name="otp"]',
+        'input[type="tel"]',
+        'input[type="number"]',
+        'input[placeholder*="digo"]',
+        'input[placeholder*="Codigo"]',
+    ],
+}
 
 _CREDENTIAL_ERROR_TEXTS = [
     "datos incorrectos",
@@ -116,7 +152,10 @@ class LoginOrchestrator:
             await self.context.add_cookies(cookies)
 
             await self.page.goto(self.config.portal_url, timeout=self.config.timeout_ms)
-            await self.page.wait_for_load_state("networkidle", timeout=self.config.timeout_ms)
+            try:
+                await self.page.wait_for_load_state("domcontentloaded", timeout=self.config.timeout_ms)
+            except Exception:
+                pass
             await asyncio.sleep(2)
 
             url = self.page.url
@@ -138,29 +177,83 @@ class LoginOrchestrator:
 
     # ------------------------------------------------------------------ login form
 
+    async def _find_field(self, field_name: str, timeout_ms: int = 30000):
+        deadline = asyncio.get_running_loop().time() + (timeout_ms / 1000)
+        last_error = None
+        while asyncio.get_running_loop().time() < deadline:
+            for selector in _SELECTOR_GROUPS.get(field_name, []):
+                try:
+                    locator = self.page.locator(selector).first
+                    count = await locator.count()
+                    if count == 0:
+                        continue
+                    if await locator.is_visible(timeout=1500):
+                        return locator
+                except Exception as exc:
+                    last_error = exc
+                    pass
+            await asyncio.sleep(0.5)
+        if last_error is not None:
+            print(f"  [Visa] campo '{field_name}' no listo todavía: {last_error}")
+        return None
+
+    async def _set_select_option(self, field_name: str, value: str) -> bool:
+        locator = await self._find_field(field_name)
+        if locator is None:
+            return False
+        try:
+            await locator.select_option(value=value)
+            return True
+        except Exception:
+            try:
+                await locator.select_option(label=value)
+                return True
+            except Exception:
+                pass
+        return False
+
     async def _fill_login_form(self) -> None:
         try:
             await self.page.goto(_LOGIN_PAGE, timeout=self.config.timeout_ms)
-            await self.page.wait_for_load_state("networkidle", timeout=self.config.timeout_ms)
+            try:
+                await self.page.wait_for_load_state("domcontentloaded", timeout=15000)
+            except Exception:
+                pass
             await asyncio.sleep(1)
 
-            await self.page.wait_for_selector(_SEL_DOC_TYPE, state="visible",
-                                              timeout=self.config.timeout_ms)
-            await self.page.locator(_SEL_DOC_TYPE).select_option(value='DNI')
+            doc_type = await self._find_field("documentType", timeout_ms=30000)
+            if doc_type is None:
+                raise LoginError(
+                    "Visa: no se encontró el selector de tipo de documento dentro del timeout esperado. "
+                    "La pantalla de login aún no está disponible o cambió."
+                )
+            if await doc_type.evaluate("el => el.tagName.toLowerCase() === 'select'"):
+                if not await self._set_select_option("documentType", "DNI"):
+                    try:
+                        await doc_type.select_option(label="DNI")
+                    except Exception:
+                        pass
             await asyncio.sleep(0.3)
 
-            await self.page.wait_for_selector(_SEL_NUMERO, state="visible",
-                                              timeout=self.config.timeout_ms)
-            await self.page.fill(_SEL_NUMERO, self.config.documento_nacional_de_identidad)
+            numero = await self._find_field("documentNumber", timeout_ms=30000)
+            if numero is None:
+                raise LoginError("Visa: no se encontró el campo de documento dentro del timeout esperado.")
+            await numero.fill(self.config.documento_nacional_de_identidad)
             await asyncio.sleep(0.3)
 
-            await self.page.fill(_SEL_USUARIO, self.config.usuario)
+            usuario = await self._find_field("username", timeout_ms=30000)
+            if usuario is None:
+                raise LoginError("Visa: no se encontró el campo de usuario dentro del timeout esperado.")
+            await usuario.fill(self.config.usuario)
             await asyncio.sleep(0.2)
 
-            await self.page.fill(_SEL_PASSWORD, self.config.password)
+            password = await self._find_field("password", timeout_ms=30000)
+            if password is None:
+                raise LoginError("Visa: no se encontró el campo de contraseña dentro del timeout esperado.")
+            await password.fill(self.config.password)
             await asyncio.sleep(0.2)
 
-            await self.page.click('button:has-text("Ingresar")')
+            await self.page.click('button:has-text("Ingresar"), button[type="submit"], button:has-text("Iniciar sesión")')
             await asyncio.sleep(3)
 
             # Detectar errores de credenciales o servidor caido
@@ -197,7 +290,7 @@ class LoginOrchestrator:
           "unknown"          → ninguno de los anteriores
         """
         try:
-            await self.page.wait_for_load_state("networkidle", timeout=10000)
+            await self.page.wait_for_load_state("domcontentloaded", timeout=10000)
         except Exception:
             pass
 
@@ -216,13 +309,16 @@ class LoginOrchestrator:
                     if txt in body:
                         return "session_conflict"
 
-                # Pantalla de OTP: tiene input numerico o boton de verificar
+                # Pantalla de OTP: input numerico o boton de verificar.
+                # El portal actual usa campos con name="code"/"otp" en un frontend React.
                 has_otp_input = await self.page.locator(
+                    'input[name="code"], input[name="otp"], '
                     'input[type="tel"], input[type="number"], '
                     'input[placeholder*="digo"], input[placeholder*="Codigo"]'
                 ).count() > 0
                 has_verify_btn = await self.page.locator(
-                    'button:has-text("Verificar"), button:has-text("Confirmar")'
+                    'button:has-text("Verificar"), button:has-text("Confirmar"), '
+                    'button:has-text("Validar"), button:has-text("Continuar")'
                 ).count() > 0
                 if has_otp_input or has_verify_btn:
                     return "otp"
@@ -259,7 +355,7 @@ class LoginOrchestrator:
                     await el.click()
                     await asyncio.sleep(2)
                     try:
-                        await self.page.wait_for_load_state("networkidle", timeout=10000)
+                        await self.page.wait_for_load_state("domcontentloaded", timeout=10000)
                     except Exception:
                         pass
                     clicked = True
@@ -283,7 +379,7 @@ class LoginOrchestrator:
         print("  [Visa] Sesion previa cerrada — esperando OTP...")
         await asyncio.sleep(4)
         try:
-            await self.page.wait_for_load_state("networkidle", timeout=10000)
+            await self.page.wait_for_load_state("domcontentloaded", timeout=10000)
         except Exception:
             pass
 
@@ -299,6 +395,7 @@ class LoginOrchestrator:
 
         try:
             codigo_input = self.page.locator(
+                'input[name="code"], input[name="otp"], '
                 'input[type="tel"], input[type="number"], input[type="text"], '
                 'input[placeholder*="digo"], input[placeholder*="Codigo"]'
             ).first
@@ -338,7 +435,7 @@ class LoginOrchestrator:
 
         await asyncio.sleep(2)
         try:
-            await self.page.wait_for_load_state("networkidle", timeout=15000)
+            await self.page.wait_for_load_state("domcontentloaded", timeout=15000)
         except Exception:
             pass
 
@@ -387,7 +484,7 @@ class LoginOrchestrator:
             url = self.page.url
 
             if "mistarjetas" in url and "login" not in url.lower():
-                await self.page.wait_for_load_state("networkidle", timeout=self.config.timeout_ms)
+                await self.page.wait_for_load_state("domcontentloaded", timeout=self.config.timeout_ms)
                 print(f"  [Visa] Dashboard: {url}")
                 return
 

@@ -13,6 +13,8 @@ Variables de entorno (en archivo .env):
     EDENOR_EMAIL, EDENOR_PASSWORD
     METROGAS_EMAIL, METROGAS_PASSWORD
 
+Telecentro con --debug usa el clon local del perfil Chrome Default.
+
 Variables opcionales por proveedor:
     <PREFIX>_OUTPUT_DIR   Directorio de destino (default: ./facturas)
     <PREFIX>_HEADLESS     true/false (default: true)

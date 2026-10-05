@@ -65,22 +65,22 @@ C:\Users\Alejandro\.claude\Code\
 - **Auth**: JWT en `localStorage.token`, enviado como `Bearer` header
 - **API Backend**: `ed.edesur.com.ar/api/` con header `x-origin-channel`
 - **Cuentas**: se leen de `localStorage.LISTA_CUENTAS_DETALLE` (se cargan tras login). Campos: contractAccount, meterNumber, name, address
-- **Descarga**: click "Descargar" -> window.open a `edesur.docuprint.com/home/download/{token_encriptado}` -> **reCAPTCHA v2** (checkbox, requiere interaccion humana) -> boton "Descarga tu factura digital" -> PDF download
-- **IMPORTANTE**: Requiere `--debug` para resolver captcha manualmente. El popup se lleva al frente con `bring_to_front()`
+- **Descarga**: click "Descargar" -> window.open a `edesur.docuprint.com/home/download/{token_encriptado}` -> verificación humana Cloudflare/reCAPTCHA si aparece -> boton "Descarga tu factura digital" -> PDF download
+- **IMPORTANTE**: Si aparece la verificación humana, ejecutar con `--debug` y completarla manualmente en Chrome visible. Edesur usa Chrome sin ajustes stealth ni User-Agent sobrescrito; la descarga continúa cuando se habilita el botón, sin intentar pulsar el captcha automáticamente.
 - **Framework**: Angular SPA con Material Design, codigo JS fuertemente obfuscado
 
 ### Telecentro (telecentro.com.ar/sucursal-virtual)
-- **Login**: email + password en `/sucursal-virtual/login`, boton "Ingresar", redirige a `/sucursal-virtual/home`
-- **Auth**: JWT capturado via network interceptor (request header `Authorization: Bearer ...` o response de endpoint `autenticar`). Enviado como `Bearer` header
-- **API Backend**: `apiext.telecentro.net.ar`
-- **Cuentas**: GET `/bss/vta/clientes/v1/byEmail?email={email}` -> devuelve lista de clientes con `clienteId`, `apellidoNombre`, `domicilio`
-- **Descarga**:
-  - **CRITICO**: La API `/bss/fac/facturacion/v1/comprobantes/cantidad/18?tipoFacturacion=S&clienteId={}` **IGNORA el query param `clienteId`** y filtra por la sesion del browser (cookies). Para cuentas multiples hay que cambiar la cuenta activa en la UI ANTES de llamar la API
-  - **Switch de cuenta**: click en la tarjeta "Número de cliente: XXXX" con icono ↺ a la derecha en el home -> aparece modal/listado -> click en la cuenta target (matchea por client_number, display_name o address)
-  - Tras cambiar cuenta, interceptar el response de `comprobantes` que dispara el JS del portal (patron `NetworkInterceptor` como Edenor)
-  - PDF: GET `https://telecentro.com.ar/tlc/facturas/show/{key}` donde `key` viene del primer comprobante capturado (ordenados del mas reciente al mas antiguo). Solo requiere cookies
+- **Login**: email + password en `/sucursal-virtual/login`. Solo se usa Playwright para capturar el JWT inicial; el browser se cierra inmediatamente despues.
+- **Auth**: JWT capturado via network interceptor (header `Authorization: Bearer ...` de los requests a apiext). El JWT embebe `nameidentifier=clienteId` en sus claims.
+- **API Backend**: `apiext.telecentro.net.ar` — todos los endpoints funcionan con JWT puro (sin cookies de browser).
+- **Cuentas**: GET `/bss/vta/clientes/v1/byEmail?email={email}` -> lista de clientes con `clienteId`, `apellidoNombre`, `domicilio`
+- **Descarga (flujo 100% httpx, sin browser)**:
+  1. **Switch JWT por cuenta**: POST `/sv/api/refreshtokenByClient` con body `{clienteid: int}` y JWT base en Authorization -> devuelve `{token, refreshtoken, clienteid}`. El nuevo JWT tiene `nameidentifier=clienteId` de la cuenta target.
+  2. **Comprobantes**: GET `/bss/fac/facturacion/v1/comprobantes/cantidad/18?tipoFacturacion=S` con el JWT de cuenta. El endpoint filtra por el clienteId del JWT (no requiere query param). Devuelve lista ordenada del mas reciente al mas antiguo con campos `key`, `fechaEmision`, `link`.
+  3. **PDF**: GET `https://telecentro.com.ar/tlc/facturas/show/{key}` con JWT de cuenta en Authorization. **No requiere cookies** (verificado el 2026-04-30).
 - **SSL**: requiere `verify=False` en httpx
-- **SPA**: Angular/Material, requiere `wait_for_load_state("networkidle")` + `asyncio.sleep()` post-navegacion
+- **IMPORTANTE**: El endpoint de comprobantes IGNORA `clienteId` como query param y usa el claim del JWT. Para cada cuenta se obtiene un JWT especifico via refreshtokenByClient.
+- **Sesion activa**: si el chrome_profile ya tiene sesion, el login omite el formulario y captura el JWT de los requests automaticos al home.
 
 ### Metrogas (registro.micuenta.metrogas.com.ar)
 - **Login**: SAML 2.0 via SAP Cloud Identity. Entry page -> "Iniciar Sesion" -> #j_username -> #logOnFormSubmit -> #j_password -> #logOnFormSubmit -> poll URL para redirect a portal
@@ -113,8 +113,8 @@ C:\Users\Alejandro\.claude\Code\
 
 ### Mastercard / Mis Consultas (misconsultas.com.ar)
 - **Login**: email (`#email`) + password (`#passw`) en `/socios/login` → click `button[type="submit"]`
-- **MFA obligatorio por SMS**: POST `/api/api/v1/auth/login` → `{temporaryToken, phoneLastNumbers}` → usuario ingresa codigo en el browser (campo `#digitosTarjeta`) → POST `/api/api/v1/auth/mfa/validation` con header `TemporaryToken` → `{token, refreshToken}`
-- **IMPORTANTE**: Requiere `--debug` para que el browser sea visible y el usuario pueda ingresar el codigo SMS
+- **MFA obligatorio**: luego de enviar credenciales, el usuario ingresa en consola el codigo vigente de su app Authenticator; el script lo completa en `#digitosTarjeta` y envia `/api/api/v1/auth/mfa/validation` con el header `TemporaryToken` → `{token, refreshToken}`
+- No requiere `--debug` para ingresar el codigo: la solicitud se realiza en consola y puede usarse con el browser headless
 - **API base**: `https://misconsultas.com.ar/api/api`
 - **Auth**: JWT via cookie `token`, enviado como `Authorization: Bearer {token}`, header `Platform: WEB`
 - **Tarjetas**: `GET /v2/creditCard/cards` → `{cards: [{cardNumber, fullName, accountNumber, financialEntity, additional}]}`
@@ -149,8 +149,9 @@ MASTERCARD_PASSWORD=...
 ```bash
 # Descargar todas las facturas de un proveedor
 python main.py --proveedor edenor --todas
-python main.py --proveedor edesur --debug --todas    # Edesur requiere --debug por captcha
-python main.py --proveedor mastercard --debug --todas  # Mastercard requiere --debug por SMS OTP
+python main.py --proveedor edesur --debug --todas    # Usar --debug si Docuprint pide verificación humana
+python main.py --proveedor mastercard --todas  # Solicita en consola el codigo actual de Authenticator si hace falta
+python main.py --proveedor telecentro --listar --debug --nosession  # Probar login fresco sin sesión guardada ni perfil persistente
 
 # Todos los proveedores a la vez
 python main.py --todos-proveedores --todas
@@ -166,18 +167,23 @@ python main.py --proveedor edenor --debug --todas
 ```
 
 ## Errores Comunes y Soluciones
+- **Login browser: credenciales manuales funcionan, automatización falla**: probar `--listar --debug --nosession` para separar el login fresco de la sesión/JWT cacheados; `--nosession` crea un perfil temporal vacío, no carga ni sobrescribe sesión persistida y elimina el perfil al terminar. Si falla, comparar el mismo login en browser manual y automatizado, registrar status + content-type + CORS headers del OPTIONS y del POST, errores de consola y navegación; nunca registrar passwords, cookies, Authorization ni JWT. Cambiar una señal del browser por vez (User-Agent, stealth, perfil, flags); no asumir que CORS es la causa solo por `net::ERR_FAILED`, ni aplicar stealth/flags globalmente sin evidencia.
+- **Chrome automatizado bloquea una API cross-origin**: distinguir OPTIONS preflight del POST real. Un OPTIONS exitoso no demuestra que la respuesta POST tenga los headers CORS requeridos; revisar status, content-type y `Access-Control-Allow-Origin` de ambos, además del cuerpo resumido/redactado. HTTP 200 puede ser HTML de error y no una respuesta JSON válida. No sustituir el flujo del frontend por un POST HTTP directo hasta verificar contrato, cookies, headers dinámicos y respuesta.
+- **Stealth innecesario o dependencia ausente**: hacer lazy-import de `playwright-stealth` y cargarlo solo para proveedores cuya configuración lo requiera; mantener diferencias por proveedor. Para Telecentro, el login fresco se resolvió con `browser_stealth=False` y `--disable-blink-features=AutomationControlled` (Chrome visible reportó `navigator.webdriver=False`). Es un hallazgo específico de Telecentro, no un default para otros proveedores.
+- **Claro login manual funciona pero automatizado recibe 403**: mantener para Claro `browser_stealth=False`, User-Agent nativo (`browser_user_agent=None`) y `--disable-blink-features=AutomationControlled`; se verifico que asi completa el login y carga las cuentas.
 - **BrowserType.launch: spawn UNKNOWN**: usar `channel="chrome"` (system Chrome)
 - **NotImplementedError en Windows**: usar `asyncio.ProactorEventLoop()` en vez de `asyncio.run()`
 - **Edenor API 400**: verificar headers `utility-id: 19`, `channel: web`, y que Authorization NO tenga "Bearer"
 - **Edenor bills vacio**: usar `/accounts/{id}/bills/last` con job polling en vez de `/bills`
 - **Metrogas SSL error**: usar `verify=False` en httpx
 - **Metrogas wait_for_url timeout**: usar polling de `page.url` (hash routing)
-- **Edesur captcha**: requiere `--debug` para resolver manualmente; el bot intenta click automatico pero reCAPTCHA v2 lo detecta
+- **Edesur verificación humana**: requiere `--debug` para resolver manualmente Cloudflare/reCAPTCHA; la descarga continúa al habilitarse el botón.
 - **Telecentro misma factura en cuentas distintas**: sintoma de que el `clienteId` del query param se esta ignorando. La API filtra por sesion del browser — hay que switchear la cuenta activa en la UI (tarjeta "Número de cliente" con icono ↺) antes de llamar la API o interceptar el response del portal
 - **Portales multi-cuenta con API session-based**: patron general — si pasar el ID como query param no cambia el resultado, la API depende de un "current account" server-side. Solucion: manipular la UI para switchear la cuenta activa antes de consumir la API, o interceptar los responses que el portal hace naturalmente (patron `NetworkInterceptor`)
 - **Visa backend caido (HTTP 500)**: el healthcheck `/health` confirma DB DOWN. Hasta que Prisma lo restaure, el script lanza `ServerUnavailableError`, lo loguea en `ejecucion.log` y continua. NO es problema de credenciales
 - **Mastercard doble underscore en .env**: `Mastercard__PASSWORD` (doble _) no matchea `env_prefix="MASTERCARD_"`. Debe ser `MASTERCARD_PASSWORD` (un solo _)
-- **Mastercard sin SMS code**: requiere `--debug` para que el browser sea visible y el usuario pueda ingresar el OTP SMS manualmente en campo `#digitosTarjeta`
+- **Mastercard sin sesión válida**: ingresa en consola el código vigente de la app Authenticator cuando se solicite; no requiere `--debug`
+- **`--nosession`**: omite la sesión API guardada, inicia el browser con un perfil temporal vacío y no reemplaza la sesión guardada ni el perfil habitual. El perfil temporal se elimina al finalizar el comando.
 - **UnicodeEncodeError en consola Windows (cp1252)**: no usar caracteres Unicode especiales (box drawing, tildes) en `print()`. Usar ASCII simple para banners
 
 ## Como Agregar un Nuevo Proveedor

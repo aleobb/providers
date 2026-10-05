@@ -24,13 +24,14 @@ _SERVER_DOWN_TEXTS = [
 
 async def do_login(page: Page, context: BrowserContext, config: MastercardConfig) -> str:
     """
-    Login en misconsultas.com.ar con MFA por SMS ingresado en el browser.
+    Login en misconsultas.com.ar con código TOTP de Authenticator ingresado en consola.
 
     Flujo:
       1. Llena email + password → click "Ingresar"
-      2. Aparece campo de OTP (id=digitosTarjeta) → el usuario lo llena en el browser
-      3. Intercepta la respuesta de /mfa/validation → captura {token, refreshToken}
-      4. Espera redirección al dashboard
+      2. Aparece campo de OTP (id=digitosTarjeta) → pedir el codigo por consola
+      3. Completa el OTP y lo envia desde el browser
+      4. Intercepta la respuesta de /mfa/validation → captura {token, refreshToken}
+      5. Espera redireccion al dashboard
     """
     try:
         await page.goto(config.login_url, timeout=config.timeout_ms)
@@ -88,18 +89,28 @@ async def do_login(page: Page, context: BrowserContext, config: MastercardConfig
     except Exception:
         pass
 
-    # Esperar a que el usuario ingrese el OTP en el browser
-    # El campo id=digitosTarjeta aparece tras el login
-    print()
-    print("  Mastercard requiere codigo SMS.")
-    print("  Ingresa el codigo en la ventana del navegador.")
-    print("  Esperando...")
-
-    # Traer la ventana al frente
+    # El campo aparece tras enviar las credenciales.
     try:
-        await page.bring_to_front()
-    except Exception:
-        pass
+        otp_input = page.locator("#digitosTarjeta")
+        await otp_input.wait_for(state="visible", timeout=config.timeout_ms)
+    except PlaywrightTimeout as e:
+        raise LoginError(
+            "Mastercard: no aparecio el campo para ingresar el codigo de Authenticator."
+        ) from e
+
+    print()
+    print("  Mastercard requiere el codigo de tu app Authenticator.")
+    otp = input("  Codigo actual de Authenticator: ").strip()
+    if not otp:
+        raise LoginError("No se ingreso el codigo de Authenticator de Mastercard")
+
+    try:
+        await otp_input.fill(otp)
+        await otp_input.press("Enter")
+    except PlaywrightTimeout as e:
+        raise LoginError(
+            f"Mastercard: timeout ingresando el codigo de Authenticator: {e}"
+        ) from e
 
     # Esperar hasta 120 segundos a que el token sea capturado o que la URL cambie
     for i in range(120):
@@ -123,7 +134,7 @@ async def do_login(page: Page, context: BrowserContext, config: MastercardConfig
     if not token_holder:
         raise LoginError(
             "Mastercard: no se capturo el token JWT. "
-            "Puede que el codigo SMS haya expirado o no se haya ingresado a tiempo."
+            "Puede que el codigo de Authenticator haya expirado o sea incorrecto."
         )
 
     print(f"  [Mastercard] Token capturado ({len(token_holder[0])} chars)")

@@ -35,5 +35,21 @@ class ClaroProvider:
         service = InvoiceService(page, self._config)
         return await service.download_for_account(account)
 
+    # ─── Session store ────────────────────────────────────────────────────────
+    # Claro aún necesita el browser para capturar la URL del popup de descarga.
+    # Por ahora solo guardamos cookies para análisis futuro del backend.
+
+    async def save_session(
+        self, page: Page, context: BrowserContext, accounts: list[Account]
+    ) -> None:
+        """Guarda cookies de Keycloak + cuentas para la próxima ejecución."""
+        from core import session_store
+        cookies = {c["name"]: c["value"] for c in await context.cookies()}
+        session_store.save(self.name, {
+            "cookies": cookies,
+            "accounts": session_store.accounts_to_list(accounts),
+        })
+        print("  [Claro] Sesión guardada.")
+
 
 register("claro", ClaroProvider)

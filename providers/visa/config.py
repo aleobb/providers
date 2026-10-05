@@ -36,7 +36,7 @@ class VisaConfig(BaseProviderConfig):
         description="URL del dashboard post-login",
     )
     api_base: str = Field(
-        "https://mistarjetas.prismamediosdepago.com/socios/auth/api",
+        "https://mis-tarjetas.prismamediosdepago.com/socios/auth/api",
         description="Base URL de la API REST",
     )
     session_file: Path = Field(

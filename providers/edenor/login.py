@@ -26,25 +26,23 @@ class LoginOrchestrator:
         try:
             url = self.config.base_url.rstrip("/") + _WELCOME_URL
             await self.page.goto(url, timeout=self.config.timeout_ms)
-            await self.page.wait_for_load_state("networkidle", timeout=self.config.timeout_ms)
             await asyncio.sleep(2)
         except PlaywrightTimeout as e:
             raise NavigationError(f"Timeout cargando la página de bienvenida: {e}") from e
 
     async def _click_email_login(self) -> None:
         try:
-            email_btn = self.page.locator("button.c0039")
+            email_btn = self.page.locator('[data-testid="unifiedAuth.email"]')
             await email_btn.wait_for(state="visible", timeout=self.config.timeout_ms)
             await email_btn.click()
             await self.page.wait_for_url(f"**{_LOGIN_URL}", timeout=self.config.timeout_ms)
-            await self.page.wait_for_load_state("networkidle", timeout=self.config.timeout_ms)
             await asyncio.sleep(1)
         except PlaywrightTimeout as e:
             raise LoginError("No se encontró el botón de login con email") from e
 
     async def _fill_credentials(self) -> None:
         try:
-            email_input = self.page.locator('input[type="text"]').first
+            email_input = self.page.locator('[data-testid="unifiedAuth.form.email"]')
             await email_input.wait_for(state="visible", timeout=self.config.timeout_ms)
             await email_input.click()
             await self.page.keyboard.type(self.config.email, delay=60)
@@ -52,7 +50,7 @@ class LoginOrchestrator:
             raise LoginError("No se encontró el campo de email") from e
 
         try:
-            pass_input = self.page.locator('input[type="password"]').first
+            pass_input = self.page.locator('[data-testid="unifiedAuth.form.password"]')
             await pass_input.click()
             await self.page.keyboard.type(self.config.password, delay=70)
         except PlaywrightTimeout as e:

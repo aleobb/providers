@@ -26,9 +26,11 @@ def parse_args() -> dict:
         "debug": False,
         "listar": False,
         "todas": False,
+        "nosession": False,
         "cuenta": None,
         "proveedor": None,
         "todos_proveedores": False,
+        "url": None,
     }
     i = 0
     while i < len(args):
@@ -38,6 +40,8 @@ def parse_args() -> dict:
             result["listar"] = True
         elif args[i] == "--todas":
             result["todas"] = True
+        elif args[i] == "--nosession":
+            result["nosession"] = True
         elif args[i] in ("--proveedor", "-p") and i + 1 < len(args):
             result["proveedor"] = args[i + 1].lower()
             i += 1
@@ -46,6 +50,9 @@ def parse_args() -> dict:
             i += 1
         elif args[i] == "--todos-proveedores":
             result["todos_proveedores"] = True
+        elif args[i] == "--url" and i + 1 < len(args):
+            result["url"] = args[i + 1]
+            i += 1
         i += 1
     return result
 
@@ -59,26 +66,127 @@ async def _download_one(provider: Provider, page, context, account):
         return None, e
 
 
+async def _run_provider_no_browser(
+    provider: Provider,
+    accounts: list,
+    todas: bool,
+    cuenta: str | None,
+    drive_uploader,
+    drive_root_id: str,
+) -> bool:
+    """
+    Descarga facturas usando sesión guardada — sin abrir el browser.
+    Devuelve True si todo fue OK; False si alguna descarga falló.
+    """
+    from core import session_store
+
+    if todas:
+        print(f"\nDescargando facturas de {len(accounts)} cuenta(s) (sin browser)...\n")
+        results = []
+        for i, account in enumerate(accounts, 1):
+            label = f"[{i}/{len(accounts)}] N {account.client_number} - {account.display_name}"
+            print(f"{label} - descargando...")
+            try:
+                path = await provider.download_invoice(None, None, account)
+                print(f"  OK: {path.resolve()}")
+                period = _determine_period(path, provider.name)
+                run_log.log_ok(provider.name, account.client_number, period, path)
+                if drive_uploader and drive_root_id:
+                    banco = account.extra.get("banco", "") if account.extra else ""
+                    _upload_to_drive(drive_uploader, drive_root_id, provider.name, period, path, banco)
+                results.append((account, path, None))
+            except Exception as e:
+                print(f"  ERROR: {e}", file=sys.stderr)
+                run_log.log_error(provider.name, account.client_number, str(e))
+                results.append((account, None, e))
+                # Si parece error de auth, invalidar sesión guardada
+                if "401" in str(e) or "403" in str(e) or "token" in str(e).lower():
+                    session_store.clear(provider.name)
+                    print(
+                        f"  [Session] Sesión invalidada — el próximo run hará login.",
+                        file=sys.stderr,
+                    )
+
+        ok = [r for r in results if r[1]]
+        fail = [r for r in results if r[2]]
+        print(f"\nResumen {provider.display_name}:")
+        for acc, path, _ in ok:
+            print(f"  OK   N {acc.client_number}: {path.name}")
+        for acc, _, err in fail:
+            print(f"  FAIL N {acc.client_number}: {err}", file=sys.stderr)
+        return len(fail) == 0
+
+    account = select_account(accounts, cuenta)
+    if len(accounts) > 1:
+        print(f"\nCuenta seleccionada: N {account.client_number} - {account.display_name}")
+
+    print("Descargando ultima factura (sin browser)...")
+    try:
+        pdf_path = await provider.download_invoice(None, None, account)
+    except Exception as e:
+        if "401" in str(e) or "403" in str(e) or "token" in str(e).lower():
+            session_store.clear(provider.name)
+        raise
+    print(f"\nFactura descargada: {pdf_path.resolve()}")
+    period = _determine_period(pdf_path, provider.name)
+    run_log.log_ok(provider.name, account.client_number, period, pdf_path)
+    if drive_uploader and drive_root_id:
+        banco = account.extra.get("banco", "") if account.extra else ""
+        _upload_to_drive(drive_uploader, drive_root_id, provider.name, period, pdf_path, banco)
+    return True
+
+
 async def run_provider(
     provider: Provider,
     debug: bool,
     listar: bool,
     todas: bool,
     cuenta: str | None,
+    url: str | None = None,
     drive_uploader=None,
     drive_root_id: str = "",
+    nosession: bool = False,
 ) -> bool:
     """Run a single provider. Returns True on full success."""
+    from core import session_store
+
     config = provider.get_config()
     if debug:
         config.headless = False
+    if url and provider.name == "edesur":
+        config.docuprint_url = url
 
     print(f"\n{'='*50}")
     print(f"  {provider.display_name}")
     print(f"{'='*50}")
+
+    # ─── Intento session-first (sin browser) ─────────────────────────────────
+    if nosession:
+        print("[Session] Ignorando la sesión guardada; se usará un perfil temporal limpio.")
+    elif not listar and hasattr(provider, "try_resume_session"):
+        saved = session_store.load(provider.name)
+        if saved:
+            print("Sesión guardada encontrada — verificando...")
+            try:
+                accounts = await provider.try_resume_session(saved)
+                if accounts is not None:
+                    run_log.log_run_start([provider.name])
+                    return await _run_provider_no_browser(
+                        provider, accounts, todas, cuenta, drive_uploader, drive_root_id
+                    )
+                else:
+                    print("Sesión expirada. Haciendo login con browser...")
+                    session_store.clear(provider.name)
+            except Exception as e:
+                print(f"  Error restaurando sesión: {e}. Haciendo login con browser...")
+                session_store.clear(provider.name)
+
+    # ─── Path con browser (flujo original) ───────────────────────────────────
     print(f"Iniciando sesion como {config.email} ...")
 
-    async with BrowserSession(config) as session:
+    async with BrowserSession(
+        config, profile_name=provider.name, fresh_profile=nosession
+    ) as session:
       try:
         await provider.login(session.page, session.context)
         print("Login exitoso.")
@@ -94,6 +202,13 @@ async def run_provider(
         accounts = await provider.fetch_accounts(session.page, session.context)
         if not accounts:
             raise InvoiceNotFoundError("No se encontraron cuentas asociadas al usuario.")
+
+        # Guardar sesión para la próxima ejecución (evita login al browser)
+        if not nosession and hasattr(provider, "save_session"):
+            try:
+                await provider.save_session(session.page, session.context, accounts)
+            except Exception as _se:
+                print(f"  [Session] No se pudo guardar: {_se}", file=sys.stderr)
 
         # --listar
         if listar:
@@ -225,6 +340,8 @@ async def run(
     cuenta: str | None,
     proveedor: str | None,
     todos_proveedores: bool,
+    url: str | None = None,
+    nosession: bool = False,
 ) -> None:
     if todos_proveedores:
         providers = all_providers()
@@ -269,8 +386,10 @@ async def run(
         try:
             ok = await run_provider(
                 provider, debug, listar, todas, cuenta,
+                url=url,
                 drive_uploader=drive_uploader,
                 drive_root_id=drive_root_id,
+                nosession=nosession,
             )
             if not ok:
                 all_ok = False

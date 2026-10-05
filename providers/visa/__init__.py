@@ -30,8 +30,12 @@ class VisaProvider:
         await self._interceptor.start(page)
         orchestrator = LoginOrchestrator(page, context, self._config)
         await orchestrator.execute()
-        # Esperar a que el dashboard cargue y dispare las API calls
-        await page.wait_for_load_state("networkidle", timeout=self._config.timeout_ms)
+        # Esperar a que el dashboard renderice el contenido; la app usa polling
+        # y no llega a networkidle de forma consistente.
+        try:
+            await page.wait_for_load_state("domcontentloaded", timeout=self._config.timeout_ms)
+        except Exception:
+            pass
         await asyncio.sleep(3)
 
     async def fetch_accounts(self, page: Page, context: BrowserContext) -> list[Account]:
@@ -56,9 +60,9 @@ class VisaProvider:
         fuera del dominio del portal autenticado.
         """
         _LOGOUT_URLS = [
-            "https://mistarjetas.prismamediosdepago.com/socios/app/logout",
-            "https://mistarjetas.prismamediosdepago.com/socios/logout",
-            "https://mistarjetas.prismamediosdepago.com/socios/j_spring_security_logout",
+            "https://mis-tarjetas.prismamediosdepago.com/socios/app/logout",
+            "https://mis-tarjetas.prismamediosdepago.com/socios/logout",
+            "https://mis-tarjetas.prismamediosdepago.com/socios/j_spring_security_logout",
         ]
         try:
             # 1. Click por JS en el link de logout (bypassa is_visible)
@@ -70,7 +74,7 @@ class VisaProvider:
                     try:
                         await page.goto(logout_url, timeout=8000)
                         try:
-                            await page.wait_for_load_state("networkidle", timeout=5000)
+                            await page.wait_for_load_state("domcontentloaded", timeout=5000)
                         except Exception:
                             pass
                         current = page.url
@@ -176,7 +180,7 @@ class VisaProvider:
                 return False
             print(f"  [Visa] Logout UI via JS: {result}")
             try:
-                await page.wait_for_load_state("networkidle", timeout=8000)
+                await page.wait_for_load_state("domcontentloaded", timeout=8000)
             except Exception:
                 pass
             # Si el click fue en un <a href="logout-url"> pero seguimos autenticados,
@@ -184,12 +188,12 @@ class VisaProvider:
             if not self._logout_succeeded(page.url) and result.get("href"):
                 href = result["href"]
                 if not href.startswith("http"):
-                    href = "https://mistarjetas.prismamediosdepago.com" + (
+                    href = "https://mis-tarjetas.prismamediosdepago.com" + (
                         href if href.startswith("/") else "/" + href
                     )
                 try:
                     await page.goto(href, timeout=8000)
-                    await page.wait_for_load_state("networkidle", timeout=5000)
+                    await page.wait_for_load_state("domcontentloaded", timeout=5000)
                 except Exception:
                     pass
             if self._logout_succeeded(page.url):
@@ -200,6 +204,23 @@ class VisaProvider:
         except Exception as e:
             print(f"  [Visa] Logout UI JS fallo: {e}")
             return False
+
+
+    # ─── Session store ────────────────────────────────────────────────────────
+    # Visa (JSF portal) aún necesita el browser para el switch de tarjeta y
+    # la captura de la URL de descarga. Solo guardamos cookies para análisis futuro.
+
+    async def save_session(
+        self, page: Page, context: BrowserContext, accounts: list[Account]
+    ) -> None:
+        """Guarda cookies de Spring Security + cuentas para la próxima ejecución."""
+        from core import session_store
+        cookies = {c["name"]: c["value"] for c in await context.cookies()}
+        session_store.save(self.name, {
+            "cookies": cookies,
+            "accounts": session_store.accounts_to_list(accounts),
+        })
+        print("  [Visa] Sesión guardada.")
 
 
 register("visa", VisaProvider)

@@ -4,6 +4,7 @@ import asyncio
 import re
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urljoin
 
 import httpx
 from playwright.async_api import BrowserContext, Page, TimeoutError as PlaywrightTimeout
@@ -93,7 +94,7 @@ class InvoiceService:
         # la URL sigue siendo mistarjetas pero el contenido no es el card-list.
         await self.page.goto(self.config.portal_url, timeout=self.config.timeout_ms)
         try:
-            await self.page.wait_for_load_state("networkidle", timeout=8000)
+            await self.page.wait_for_load_state("domcontentloaded", timeout=8000)
         except Exception:
             pass
         await asyncio.sleep(0.6)
@@ -101,6 +102,24 @@ class InvoiceService:
         await dismiss_popups(self.page, label="visa")
         # Popup especifico del portal: "Habilitá tus tarjetas" / "Habilitar tarjetas"
         await self._dismiss_visa_popups()
+
+        try:
+            await self.page.locator(
+                '#cardsDropDown, li.card-item.clearfix, button:has-text("Ver resumen")'
+            ).first.wait_for(state="attached", timeout=self.config.timeout_ms)
+        except PlaywrightTimeout:
+            state = await self.page.evaluate(
+                """() => ({
+                    title: document.title,
+                    body: (document.body?.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 240),
+                    url: location.href,
+                })"""
+            )
+            raise DownloadError(
+                "Visa no mostró los controles del dashboard. "
+                f"URL: {state['url']}; título: {state['title']!r}; "
+                f"contenido: {state['body']!r}"
+            )
 
     async def _dismiss_visa_popups(self) -> None:
         """
@@ -189,7 +208,7 @@ class InvoiceService:
         # El portal es jQuery/JSP: el contenido carga en la misma pagina via AJAX.
         # Esperamos networkidle + pausa extra para que el DOM se actualice.
         try:
-            await self.page.wait_for_load_state("networkidle", timeout=15000)
+            await self.page.wait_for_load_state("domcontentloaded", timeout=15000)
         except Exception:
             pass
         await asyncio.sleep(2)
@@ -246,8 +265,8 @@ class InvoiceService:
             print(f"  [Visa] Tarjeta activa ya es ****{last4} — sin switch.")
             return
 
-        # changeCard(token) funciona aunque el dropdown este cerrado: los <li>
-        # existen en DOM igual (solo con display:none). Skipeamos abrir el panel.
+        # Algunas respuestas del portal solo insertan las tarjetas al abrir el panel.
+        await self._open_card_selector()
         await self._click_card_in_dropdown(last4)
 
         # Verificar que el switch ocurrio
@@ -256,7 +275,27 @@ class InvoiceService:
                 print(f"  [Visa] Switch confirmado: tarjeta activa = ****{last4}.")
                 return
             await asyncio.sleep(0.5)
-        print(f"  [Visa] Advertencia: no pude confirmar el switch a ****{last4}.")
+        raise DownloadError(
+            f"Visa no confirmó el cambio a la tarjeta ****{last4}. "
+            f"Tarjeta activa: {await self._active_card_number() or 'desconocida'}; "
+            f"URL: {self.page.url}"
+        )
+
+    async def _active_card_number(self) -> str | None:
+        try:
+            return await self.page.evaluate(
+                r"""() => {
+                    const spans = Array.from(document.querySelectorAll('span'));
+                    for (const span of spans) {
+                        if (!span.offsetParent || span.closest('#cardContent')) continue;
+                        const match = (span.textContent || '').match(/XXXX\s+XXXX\s+XXXX\s+(\d{4})/);
+                        if (match) return match[1];
+                    }
+                    return null;
+                }"""
+            )
+        except Exception:
+            return None
 
     async def _active_card_matches(self, last4: str) -> bool:
         """
@@ -400,42 +439,76 @@ class InvoiceService:
         if call_result.get("ok"):
             # El form submit hace una navegacion — esperar recarga del dashboard
             try:
-                await self.page.wait_for_load_state("networkidle", timeout=10000)
+                await self.page.wait_for_load_state("domcontentloaded", timeout=10000)
             except Exception:
                 pass
             await asyncio.sleep(0.8)
             await dismiss_popups(self.page, label="visa-card-switch")
             return
 
-        # 2) Fallback: Playwright click sobre el LI (por si la estructura cambio)
-        print(f"  [Visa] Fallback a Playwright click...")
+        # 2) Fallback: Playwright click sobre cualquier elemento visible que contenga el 4digito
+        # (por si la estructura cambio o no hay li.card-item.clearfix en el DOM)
+        print(f"  [Visa] Fallback a Playwright click por texto visible...")
         for locator_str in [
+            'li.card-item.clearfix',
             '#cardContent li.card-item.clearfix',
             'ul.card-dropdown-menu li.card-item',
-            'li.card-item.clearfix',
+            'button, a, div, span, li',
         ]:
-            lis = self.page.locator(locator_str)
-            count = await lis.count()
+            items = self.page.locator(locator_str)
+            count = await items.count()
             if count == 0:
                 continue
-            for i in range(count):
-                li = lis.nth(i)
+            for i in range(min(count, 200)):
+                item = items.nth(i)
                 try:
-                    text = await li.text_content() or ''
+                    text = (await item.text_content()) or ''
                     if last4 not in text:
                         continue
-                    await li.click(timeout=3000, force=True)
-                    print(f"  [Visa] Click Playwright '{locator_str}' ****{last4}")
+                    # Evitar elementos ocultos / no clickeables
+                    if not await item.is_visible(timeout=800):
+                        continue
+                    await item.click(timeout=3000, force=True)
+                    print(f"  [Visa] Click Playwright fallback '{locator_str}' ****{last4}")
                     try:
-                        await self.page.wait_for_load_state("networkidle", timeout=10000)
+                        await self.page.wait_for_load_state("domcontentloaded", timeout=10000)
                     except Exception:
                         pass
                     await asyncio.sleep(0.8)
                     await dismiss_popups(self.page, label="visa-card-switch-pw")
                     return
                 except Exception as e:
-                    print(f"  [Visa] Playwright click error li[{i}]: {e}")
+                    print(f"  [Visa] Playwright click error fallback [{locator_str}][{i}]: {e}")
             break
+
+        # 3) Ultimo recurso: buscar por texto visible usando JS y hacer click directamente
+        clicked = await self.page.evaluate(
+            r"""(last4) => {
+                const candidates = Array.from(document.querySelectorAll('button, a, div, span, li'));
+                for (const el of candidates) {
+                    if (!el || !el.isConnected) continue;
+                    const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+                    if (!t.includes(last4)) continue;
+                    try {
+                        el.click();
+                        return { ok: true, tag: el.tagName, text: t.slice(0, 120) };
+                    } catch (e) {
+                        return { ok: false, reason: String(e) };
+                    }
+                }
+                return { ok: false, reason: 'no_clickable_target' };
+            }""",
+            last4,
+        )
+        print(f"  [Visa] Fallback JS por texto: {clicked}")
+        if clicked.get("ok"):
+            try:
+                await self.page.wait_for_load_state("domcontentloaded", timeout=10000)
+            except Exception:
+                pass
+            await asyncio.sleep(0.8)
+            await dismiss_popups(self.page, label="visa-card-switch-js")
+            return
 
     async def _dump_card_selector_elements(self, last4: str) -> None:
         """Muestra los LI del selector de tarjetas que contienen los 4 digitos."""
@@ -471,11 +544,12 @@ class InvoiceService:
         Navega a la pagina de resumen de la tarjeta activa.
 
         En el portal Prisma el acceso al resumen puede ser:
-        - <button type='submit' class='button right white-button'>Ver resumen</button>
+        - <input type='submit' value='Ver resumen'>
+        - <button type='submit'>Ver resumen</button>
         - <a href='#'>Ver Resumen completo</a>
         - o items de submenu dropit (ocultos hasta hover)
 
-        Usamos Playwright primero (mas confiable para botones submit) y luego JS.
+        Priorizamos el submit real; no hacemos click en contenedores de texto.
         """
         # Textos posibles del boton/link de resumen
         _RESUMEN_TEXTS = [
@@ -488,7 +562,20 @@ class InvoiceService:
             "Mi Resumen",
         ]
 
-        # 1. Playwright: buscar botones visibles (es un <button submit> en el dashboard)
+        # 1. El portal JSF renderiza el submit como input, no como button.
+        submits = self.page.locator('input[type="submit"]')
+        for index in range(await submits.count()):
+            try:
+                el = submits.nth(index)
+                value = (await el.get_attribute("value") or "").strip()
+                if "resumen" in value.lower() and await el.is_visible(timeout=400):
+                    print(f"  [Visa] Click resumen via input submit: {value!r}")
+                    await el.click()
+                    return True
+            except Exception:
+                pass
+
+        # 2. Buscar botones/enlaces accionables visibles.
         for text in _RESUMEN_TEXTS:
             for tag in ["button", "a"]:
                 try:
@@ -500,15 +587,24 @@ class InvoiceService:
                 except Exception:
                     pass
 
-        # 2. JS: buscar en <a> y <button> (incluso ocultos — dropit submenu)
+        # 3. Fallback JS limitado a controles accionables para evitar falsos positivos.
         clicked = await self.page.evaluate(
             """(texts) => {
-                const els = Array.from(document.querySelectorAll('a, button'));
+                const els = Array.from(document.querySelectorAll(
+                    'a, button, input[type="submit"], [role="button"]'
+                )).filter(el => el.offsetParent !== null);
                 for (const text of texts) {
-                    const target = els.find(e => (e.textContent || '').trim() === text);
-                    if (target) {
-                        target.click();
-                        return text;
+                    const match = els.find(e => {
+                        const t = (e.value || e.textContent || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+                        return t.includes(text.toLowerCase()) || t.includes(text.toLowerCase().replace(/\\s+/g, ''));
+                    });
+                    if (match) {
+                        try {
+                            match.click();
+                            return text;
+                        } catch (e) {
+                            return text;
+                        }
                     }
                 }
                 return null;
@@ -603,30 +699,37 @@ class InvoiceService:
         return None
 
     async def _click_download_button(self) -> None:
-        # Textos del portal Prisma para el link de descarga (en orden de prioridad)
-        # Confirmado por dump: 'a:has-text("Descargar / Imprimir")' es el real
-        candidates = [
-            'a:has-text("Descargar / Imprimir")',
-            'a:has-text("Descargar / imprimir")',
-            'a:has-text("Descargar resumen")',
-            'a:has-text("Descargar Resumen")',
-            'a:has-text("Descargar")',
-            'a:has-text("Descargar PDF")',
-            'a:has-text("PDF")',
-            'a[href*="descargar"]',
-            'a[href*="download"]',
-            'a[href*=".pdf"]',
-        ]
-        for selector in candidates:
+        # El portal puede renderizar la accion como enlace, boton o submit.
+        clickables = self.page.locator(
+            'a, button, input[type="button"], input[type="submit"], '
+            '[role="button"], [onclick]'
+        )
+        for index in range(await clickables.count()):
             try:
-                el = self.page.locator(selector).first
-                if await el.count() > 0 and await el.is_visible(timeout=2000):
-                    print(f"  [Visa] Click descarga: {selector}")
-                    await el.click()
-                    return
+                el = clickables.nth(index)
+                if not await el.is_visible(timeout=300):
+                    continue
+                label = " ".join(filter(None, [
+                    await el.text_content(),
+                    await el.get_attribute("value"),
+                    await el.get_attribute("title"),
+                    await el.get_attribute("aria-label"),
+                ])).strip().lower()
+                if not re.search(r"descarg|imprim|pdf", label):
+                    continue
+                print(f"  [Visa] Click descarga en control: {label[:100]!r}")
+                await el.click()
+                return
             except Exception:
                 pass
-        # Si no encontramos ningun link de descarga, volcar los links visibles
+
+        # El resumen puede estar embebido y no ofrecer un control de descarga.
+        embedded_pdf = await self._find_pdf_link_in_dom()
+        if embedded_pdf:
+            print(f"  [Visa] PDF embebido detectado: {embedded_pdf}")
+            return
+
+        # Si no encontramos una accion, volcar los controles y links para diagnostico.
         await self._dump_resumen_links()
         raise DownloadError("No se encontro link de descarga en la pagina de resumen de Visa")
 
@@ -641,18 +744,29 @@ class InvoiceService:
         return None
 
     async def _find_pdf_link_in_dom(self) -> str | None:
-        """Busca links a PDFs en el DOM de la pagina."""
-        base = "https://mistarjetas.prismamediosdepago.com"
+        """Busca links o visores embebidos que apunten al PDF del resumen."""
         try:
-            links = await self.page.query_selector_all(
-                "a[href*='.pdf'], a[href*='pdf'], a[href*='resumen'], a[href*='download']"
+            urls = await self.page.evaluate(
+                r"""() => {
+                    const result = [];
+                    for (const el of document.querySelectorAll(
+                        'a[href], iframe[src], embed[src], object[data]'
+                    )) {
+                        const url = el.getAttribute('href')
+                            || el.getAttribute('src')
+                            || el.getAttribute('data');
+                        if (!url) continue;
+                        const type = (el.getAttribute('type') || '').toLowerCase();
+                        const hint = `${url} ${type}`.toLowerCase();
+                        if (/\.pdf|pdf|resumen|download|descarg/.test(hint)) {
+                            result.push(url);
+                        }
+                    }
+                    return result;
+                }"""
             )
-            for link in links:
-                href = await link.get_attribute("href")
-                if href:
-                    if href.startswith("/"):
-                        href = base + href
-                    return href
+            for url in urls:
+                return urljoin(self.page.url, url)
         except Exception as e:
             print(f"  [Visa] Error buscando links PDF: {e}")
         return None

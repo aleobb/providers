@@ -37,4 +37,21 @@ class EdesurProvider:
         return await service.download_for_client(account.client_number)
 
 
+    # ─── Session store ────────────────────────────────────────────────────────
+    # Edesur tiene reCAPTCHA interactivo. Por ahora solo guardamos cookies.
+    # El path alternativo via Gmail (docuprint URL) no requiere sesión propia.
+
+    async def save_session(
+        self, page: Page, context: BrowserContext, accounts: list[Account]
+    ) -> None:
+        """Guarda cookies del portal Edesur + cuentas para la próxima ejecución."""
+        from core import session_store
+        cookies = {c["name"]: c["value"] for c in await context.cookies()}
+        session_store.save(self.name, {
+            "cookies": cookies,
+            "accounts": session_store.accounts_to_list(accounts),
+        })
+        print("  [Edesur] Sesión guardada.")
+
+
 register("edesur", EdesurProvider)

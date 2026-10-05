@@ -42,11 +42,31 @@ def _is_still_processing(data: Any) -> bool:
 
 
 class InvoiceService:
-    def __init__(self, context, page, interceptor: NetworkInterceptor, config: EdenorConfig):
+    def __init__(
+        self,
+        context,
+        page,
+        interceptor: NetworkInterceptor | None,
+        config: EdenorConfig,
+        *,
+        saved_cookies: dict | None = None,
+        saved_token: str | None = None,
+    ):
         self.context = context
         self.page = page
         self.interceptor = interceptor
         self.config = config
+        # Credenciales guardadas (path sin browser)
+        self._saved_cookies = saved_cookies
+        self._saved_token = saved_token
+
+    async def _get_cookies_and_token(self) -> tuple[dict, str]:
+        """Devuelve (cookies_dict, raw_token) ya sea desde browser o sesión guardada."""
+        if self._saved_cookies is not None:
+            return self._saved_cookies, self._saved_token or ""
+        cookies = {c["name"]: c["value"] for c in await self.context.cookies()}
+        raw_token = (self.interceptor.auth_token or "").removeprefix("Bearer ").strip()
+        return cookies, raw_token
 
     def _build_headers(self, raw_token: str) -> dict:
         h = {
@@ -61,8 +81,7 @@ class InvoiceService:
         return h
 
     async def download_latest(self, account_id: str, client_number: str) -> Path:
-        cookies = {c["name"]: c["value"] for c in await self.context.cookies()}
-        raw_token = (self.interceptor.auth_token or "").removeprefix("Bearer ").strip()
+        cookies, raw_token = await self._get_cookies_and_token()
         headers = self._build_headers(raw_token)
 
         async with httpx.AsyncClient(
@@ -74,6 +93,18 @@ class InvoiceService:
         period = _period_str(bill)
         dest_path = unique_path(dest_dir / f"edenor_{period}_factura.pdf")
 
+        # Sin browser: siempre usar path API (no puede hacer click en el botón)
+        if self.page is None:
+            external_id = bill.get("external_id")
+            if not external_id:
+                raise DownloadError("No se encontró el external_id en la factura.")
+            cookies2, _ = await self._get_cookies_and_token()
+            async with httpx.AsyncClient(
+                cookies=cookies2, headers=headers, follow_redirects=True, timeout=60
+            ) as client2:
+                return await self._api_download(client2, client_number, external_id, dest_path)
+
+        # Con browser: lógica original
         page_content = await self.page.content()
         if client_number in page_content:
             return await self._browser_download(dest_path)

@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 import httpx
-from playwright.async_api import Page, Response
 
 from core.accounts import Account
 from core.exceptions import DownloadError
@@ -13,165 +11,139 @@ from .config import TelecentroConfig
 
 
 class InvoiceService:
-    def __init__(self, page: Page, config: TelecentroConfig, jwt: str):
-        self.page = page
+    """
+    Descarga facturas de Telecentro via API REST directa (sin browser).
+
+    Flujo por cuenta:
+    1. POST /sv/api/refreshtokenByClient con {clienteid} y JWT base
+       → JWT especifico para esa cuenta (el nameidentifier del JWT embebe el clienteId)
+    2. GET /bss/fac/facturacion/v1/comprobantes/cantidad/18?tipoFacturacion=S
+       con el JWT de cuenta → lista de comprobantes filtrada por el JWT
+    3. GET /tlc/facturas/show/{key}
+       con el JWT de cuenta → PDF de la factura mas reciente
+
+    Descubrimiento de endpoints realizado el 2026-04-30 via analisis de trafico
+    y source JS del SPA (assets/useSvClient-*.js).
+    """
+
+    def __init__(self, config: TelecentroConfig, base_jwt: str):
         self.config = config
-        self.jwt = jwt
+        self.base_jwt = base_jwt
 
     async def download_for_client(self, account: Account) -> Path:
-        client_number = account.client_number
+        client_id = account.client_number
 
-        # Paso 1: obtener comprobantes navegando el portal (la API usa sesión, no clienteId)
-        comprobantes = await self._capture_comprobantes_via_browser(account)
+        # Paso 1: obtener JWT especifico para esta cuenta
+        account_jwt = await self._get_account_jwt(client_id)
+
+        # Paso 2: obtener comprobantes
+        comprobantes = await self._fetch_comprobantes(account_jwt)
         if not comprobantes:
-            raise DownloadError(f"No se capturaron comprobantes para cuenta {client_number}")
+            raise DownloadError(f"No hay comprobantes disponibles para cuenta {client_id}")
 
         latest = comprobantes[0]
         key = latest.get("key", "")
         if not key:
-            raise DownloadError("El comprobante más reciente no tiene 'key' para descargar")
+            raise DownloadError(f"El comprobante más reciente no tiene 'key' para descargar")
 
         fecha = latest.get("fechaEmision", "")
         period = _parse_period(fecha)
 
-        # Paso 2: descargar el PDF con las cookies actualizadas del browser
-        cookies = {c["name"]: c["value"] for c in await self.page.context.cookies()}
-        headers = {
-            "Authorization": f"Bearer {self.jwt}",
-            "Content-Type": "application/json",
-        }
-
-        async with httpx.AsyncClient(
-            headers=headers, cookies=cookies, follow_redirects=True, timeout=60, verify=False
-        ) as client:
-            pdf_url = f"{self.config.invoices_url}/{key}"
-            pdf_r = await client.get(pdf_url)
-            if pdf_r.status_code >= 400:
-                raise DownloadError(
-                    f"HTTP {pdf_r.status_code} al descargar PDF para cuenta {client_number}"
-                )
+        # Paso 3: descargar PDF
+        pdf_bytes = await self._download_pdf(account_jwt, key, client_id)
 
         dest_dir = self.config.ensure_output_dir()
         dest_path = unique_path(
-            dest_dir / f"telecentro_{period}_{client_number}_factura.pdf"
+            dest_dir / f"telecentro_{period}_{client_id}_factura.pdf"
         )
-        dest_path.write_bytes(pdf_r.content)
+        dest_path.write_bytes(pdf_bytes)
         return dest_path
 
-    async def _capture_comprobantes_via_browser(self, account: Account) -> list | None:
+    async def _get_account_jwt(self, client_id: str) -> str:
         """
-        Navega el portal hacia la cuenta indicada e intercepta el response de comprobantes
-        que el JS del portal dispara naturalmente (la API filtra por sesión, no por query param).
+        Intercambia el JWT base por uno especifico al clienteId dado.
+        Endpoint: POST /sv/api/refreshtokenByClient
+        Body: {clienteid: <int>}
+        Respuesta: {token, refreshtoken, clienteid}
+
+        El JWT resultante tiene nameidentifier == clienteId, por lo que
+        la API de comprobantes filtrara automaticamente por esa cuenta.
+        Si el clienteId ya coincide con el JWT base, devuelve el mismo JWT.
         """
-        captures: list[list] = []
-
-        async def on_response(response: Response) -> None:
-            if "comprobantes" in response.url and response.status == 200:
-                try:
-                    data = await response.json()
-                    comps = data.get("comprobantes", [])
-                    if comps:
-                        captures.append(comps)
-                except Exception:
-                    pass
-
-        self.page.on("response", on_response)
-        try:
-            # Navegar al portal — dispara la carga de la cuenta activa
-            await self.page.goto(self.config.portal_url, timeout=self.config.timeout_ms)
-            await self.page.wait_for_load_state("networkidle", timeout=self.config.timeout_ms)
-            await asyncio.sleep(2)
-
-            before_switch = len(captures)
-
-            # Intentar cambiar a la cuenta target en la UI
-            switched = await self._switch_account_in_ui(account)
-
-            if switched:
-                # Esperar a que el portal recargue los datos de la nueva cuenta
-                await asyncio.sleep(2)
-                await self.page.wait_for_load_state("networkidle", timeout=self.config.timeout_ms)
-
-                # Preferir captures posteriores al switch
-                if len(captures) > before_switch:
-                    return captures[-1]
-
-            # Devolver lo último capturado (puede ser la cuenta correcta si ya estaba activa)
-            return captures[-1] if captures else None
-        finally:
-            self.page.remove_listener("response", on_response)
-
-    async def _switch_account_in_ui(self, account: Account) -> bool:
-        """
-        Hace clic en la tarjeta "Número de cliente: XXXX" (con ícono ↺ a la derecha)
-        y luego selecciona la cuenta target en el modal que aparece.
-        """
-        search_terms = [t for t in [account.client_number, account.display_name, account.address] if t]
-
-        # Esperar a que la tarjeta con "Número de cliente" esté visible
-        try:
-            await self.page.locator(':text("Número de cliente")').first.wait_for(
-                state="visible", timeout=15000
+        headers = {
+            "Authorization": f"Bearer {self.base_jwt}",
+            "Content-Type": "application/json",
+        }
+        async with httpx.AsyncClient(headers=headers, verify=False, timeout=30) as client:
+            r = await client.post(
+                f"{self.config.api_base}/sv/api/refreshtokenByClient",
+                json={"clienteid": int(client_id)},
             )
-        except Exception as e:
-            print(f"[DEBUG telecentro] No se encontró la tarjeta 'Número de cliente': {e}")
-            return False
+            if r.status_code >= 400:
+                raise DownloadError(
+                    f"HTTP {r.status_code} al obtener JWT para cuenta {client_id}: {r.text[:200]}"
+                )
+            data = r.json()
+            token = data.get("token", "")
+            if not token:
+                raise DownloadError(
+                    f"refreshtokenByClient no devolvió token para cuenta {client_id}"
+                )
+            return token
 
-        await asyncio.sleep(1)
+    async def _fetch_comprobantes(self, account_jwt: str) -> list:
+        """
+        Obtiene la lista de comprobantes para la cuenta del JWT.
+        El endpoint filtra por el clienteId embebido en el JWT (nameidentifier),
+        por eso no se pasa clienteId como query param.
+        Endpoint: GET /bss/fac/facturacion/v1/comprobantes/cantidad/18?tipoFacturacion=S
+        Respuesta: {comprobantes: [{key, fechaEmision, link, importe, ...}]}
+        """
+        headers = {
+            "Authorization": f"Bearer {account_jwt}",
+            "Accept": "application/json",
+        }
+        async with httpx.AsyncClient(headers=headers, verify=False, timeout=30) as client:
+            r = await client.get(
+                f"{self.config.api_base}/bss/fac/facturacion/v1/comprobantes/cantidad/18",
+                params={"tipoFacturacion": "S"},
+            )
+            if r.status_code >= 400:
+                raise DownloadError(
+                    f"HTTP {r.status_code} al obtener comprobantes: {r.text[:200]}"
+                )
+            data = r.json()
+            return data.get("comprobantes", [])
 
-        # Estrategias de clic, de más específico (ícono) a más genérico (tarjeta entera)
-        click_strategies = [
-            "mat-card:has-text('Número de cliente') button",
-            "mat-card:has-text('Número de cliente') mat-icon",
-            "mat-card:has-text('Número de cliente') a",
-            "mat-card:has-text('Número de cliente')",
-            "[class*='card']:has-text('Número de cliente') button",
-            "[class*='card']:has-text('Número de cliente') [class*='icon']",
-            "[class*='card']:has-text('Número de cliente')",
-            ":text('Número de cliente:') >> xpath=ancestor::*[self::div or self::a or self::button][1]",
-        ]
-
-        clicked = False
-        for selector in click_strategies:
-            try:
-                elem = self.page.locator(selector).first
-                if await elem.count() == 0:
-                    continue
-                if not await elem.is_visible(timeout=1500):
-                    continue
-                await elem.click(timeout=3000)
-                print(f"[DEBUG telecentro] Switcher clickeado con: {selector}")
-                clicked = True
-                break
-            except Exception as e:
-                print(f"[DEBUG telecentro] Selector falló '{selector}': {e}")
-                continue
-
-        if not clicked:
-            print("[DEBUG telecentro] No se pudo clickear el switcher de cuentas")
-            return False
-
-        # Esperar a que aparezca el modal/listado
-        await asyncio.sleep(2)
-
-        # Buscar la cuenta target en el listado que apareció
-        for term in search_terms:
-            try:
-                target = self.page.get_by_text(str(term), exact=False).last
-                if await target.is_visible(timeout=3000):
-                    await target.click()
-                    print(f"[DEBUG telecentro] Cuenta seleccionada por término: {term}")
-                    return True
-            except Exception as e:
-                print(f"[DEBUG telecentro] No se encontró cuenta por '{term}': {e}")
-                continue
-
-        print(f"[DEBUG telecentro] No se encontró la cuenta {account.client_number} en el modal")
-        return False
+    async def _download_pdf(self, account_jwt: str, key: str, client_id: str) -> bytes:
+        """
+        Descarga el PDF de la factura.
+        Endpoint: GET /tlc/facturas/show/{key}
+        Solo requiere el JWT en Authorization (verificado el 2026-04-30).
+        """
+        headers = {
+            "Authorization": f"Bearer {account_jwt}",
+        }
+        pdf_url = f"{self.config.invoices_url}/{key}"
+        async with httpx.AsyncClient(
+            headers=headers, verify=False, follow_redirects=True, timeout=60
+        ) as client:
+            r = await client.get(pdf_url)
+            if r.status_code >= 400:
+                raise DownloadError(
+                    f"HTTP {r.status_code} al descargar PDF para cuenta {client_id}"
+                )
+            content_type = r.headers.get("content-type", "")
+            if "pdf" not in content_type.lower() and len(r.content) < 1000:
+                raise DownloadError(
+                    f"La respuesta del PDF no parece un PDF válido "
+                    f"(content-type: {content_type}, size: {len(r.content)})"
+                )
+            return r.content
 
 
 def _parse_period(fecha: str) -> str:
-    """Convierte 'DD/MM/YYYY' a 'YYYY-MM'. Devuelve 'sin-fecha' si no puede parsear."""
+    """Convierte 'DD/MM/YYYY' a 'YYYY-MM'. Devuelve 'sin-fecha' si falla."""
     try:
         parts = fecha.split("/")
         if len(parts) == 3:

@@ -15,6 +15,10 @@ class LoginOrchestrator:
 
     async def execute(self) -> None:
         await self._navigate_to_login()
+        # Si la sesión guardada ya nos dejó en el portal, salteamos el login.
+        if "/mi-cuenta" in self.page.url or "/home" in self.page.url:
+            await self.page.wait_for_load_state("networkidle", timeout=self.config.timeout_ms)
+            return
         await self._fill_credentials()
         await self._wait_for_portal()
 

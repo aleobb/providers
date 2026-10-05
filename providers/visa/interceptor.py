@@ -7,6 +7,7 @@ from playwright.async_api import Page, Response
 
 # Fragmentos de URL que nos interesan en el trafico de Prisma
 _API_FRAGMENTS = (
+    "mis-tarjetas.prismamediosdepago.com",
     "mistarjetas.prismamediosdepago.com",
     "mycards.prismamediosdepago.com",
 )

@@ -27,7 +27,10 @@ async def fetch_accounts(
     # Asegurar que estamos en el dashboard
     if "mistarjetas" not in page.url:
         await page.goto(config.portal_url, timeout=config.timeout_ms)
-        await page.wait_for_load_state("networkidle", timeout=config.timeout_ms)
+        try:
+            await page.wait_for_load_state("domcontentloaded", timeout=config.timeout_ms)
+        except Exception:
+            pass
         await asyncio.sleep(3)
 
     await _close_popup(page)

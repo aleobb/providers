@@ -7,8 +7,9 @@ Script Python para loguearse en portales web de proveedores de servicios (con us
 
 ### Estructura de Archivos
 ```
-C:\Users\Alejandro\.claude\Code\
+<raiz-del-proyecto>\
 ├── main.py                          # Entry point -> core.cli.main()
+├── scripts/                         # Herramientas de diagnóstico de Visa
 ├── .env                             # Credenciales por proveedor
 ├── requirements.txt                 # playwright, python-dotenv, httpx, pydantic-settings, tenacity
 ├── core/

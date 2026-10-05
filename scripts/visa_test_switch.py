@@ -11,6 +11,9 @@ import json
 import sys
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright
 
@@ -18,7 +21,7 @@ load_dotenv()
 
 from providers.visa.config import VisaConfig
 
-DUMP_DIR = Path(__file__).parent / "visa_switch_test"
+DUMP_DIR = PROJECT_ROOT / "visa_switch_test"
 DUMP_DIR.mkdir(exist_ok=True)
 
 

@@ -2,7 +2,7 @@
 Script de sesion de debug para el portal Visa/Prisma.
 
 Uso:
-    python visa_debug_session.py
+    python scripts/visa_debug_session.py
 
 Abre el portal en un browser visible. En cada paso presiona ENTER en la terminal
 y el script vuelca el estado del DOM en dump_step_XX.txt para diagnostico.
@@ -15,6 +15,9 @@ import re
 import sys
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright
 
@@ -22,7 +25,7 @@ load_dotenv()
 
 from providers.visa.config import VisaConfig
 
-DUMP_DIR = Path(__file__).parent / "visa_debug_dumps"
+DUMP_DIR = PROJECT_ROOT / "visa_debug_dumps"
 DUMP_DIR.mkdir(exist_ok=True)
 
 _STEP = 0

@@ -81,12 +81,23 @@ class InvoiceService:
         try:
             async with self.page.expect_popup(timeout=15000) as popup_info:
                 await self.page.click(selector)
-            popup = await popup_info.value
-            await popup.wait_for_load_state("domcontentloaded", timeout=15000)
-            url = popup.url
-            await popup.close()
         except PlaywrightTimeout:
             raise DownloadError("El popup de descarga de Claro no se abrió en el tiempo esperado")
+        popup = await popup_info.value
+        try:
+            await popup.wait_for_url(
+                lambda url: "ultima" in url,
+                timeout=15000,
+                wait_until="domcontentloaded",
+            )
+            url = popup.url
+        except PlaywrightTimeout as error:
+            raise DownloadError(
+                "El popup de descarga de Claro se abrió, pero no navegó a la URL "
+                f"de la factura. URL actual: {popup.url!r}"
+            ) from error
+        finally:
+            await popup.close()
 
         if not url or "ultima" not in url:
             raise DownloadError(f"URL de descarga de Claro inesperada: {url!r}")

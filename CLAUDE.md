@@ -91,11 +91,14 @@ C:\Users\Alejandro\.claude\Code\
 
 ### Claro (m-miclaro.claro.com.ar)
 - **Login**: OAuth2/OIDC via Keycloak (ingreso.claro.com.ar) en 2 pasos: email → "Continuar" → password → submit → redirect a /elegirservicio
+- **Fingerprint de Chrome**: login manual funciona, pero Chrome automatizado puede recibir HTTP 403 tras enviar el email y mostrar "Request error". En `ClaroConfig`, usar `browser_stealth=False`, `browser_user_agent=None` y `browser_args=["--disable-blink-features=AutomationControlled"]`; con esta configuracion se verifico el login automatizado y la carga de cuentas. Mantener el ajuste limitado a Claro.
+- **Sesion persistente**: el perfil `.chrome_profile/claro` puede conservar una sesion iniciada; `portal_url` puede pasar por `/home` antes de redirigir a `elegirservicio`. Esperar por el formulario email o la URL autenticada y, si llega a `elegirservicio`, omitir los pasos email/password.
 - **Cuentas**: /elegirservicio muestra botones DIV (`role="button"`) por cada linea. Click en cada uno navega a `/{base64(billNumber)}/home` del cual se extrae el billNumber (numero de linea celular)
 - **billNumber**: numero de linea codificado en base64 en el path de la URL. Ej: `1157004151` → `MTE1NzAwNDE1MQ==` (URL-encoded como `MTE1NzAwNDE1MQ%3D%3D`)
 - **Descarga**: navegar a `/{base64(billNumber)}/factura` → click `:text("Descargar factura en PDF")` → interceptar popup con `page.expect_popup()` → URL del popup es `/factura/back/public/facturas/ultima?t={token}` → httpx GET con cookies del browser
 - **Periodo**: interceptado del response de `/factura/back/cuenta/ciclos` (GET 200) al cargar la pagina de factura
 - **Multi-cuenta**: cada linea es independiente; el portal no requiere switch de cuenta activa (el billNumber esta en la URL)
+- **Popup de descarga**: al abrir puede permanecer brevemente en `about:blank`; esperar con `popup.wait_for_url` hasta `/facturas/ultima` antes de leer `popup.url`, no depender solo de `domcontentloaded` en la pagina vacia.
 
 ### Visa / Prisma Medios de Pago (mycards.prismamediosdepago.com)
 - **Login**: formulario con `select#documentType` (value=DNI), `#documentNumber`, `#username` (type=password), `#password` → click "Ingresar"

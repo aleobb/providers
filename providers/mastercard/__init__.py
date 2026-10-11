@@ -10,7 +10,7 @@ from core.provider import Provider
 from core.registry import register
 from .accounts import fetch_accounts as _fetch_accounts
 from .config import MastercardConfig
-from .invoice import download_invoice as _download_invoice
+from .invoice import InvoiceService
 from .login import do_login
 
 
@@ -28,6 +28,7 @@ class MastercardProvider(Provider):
         self._config = MastercardConfig()
         self._token: str = ""
         self._cookies: dict[str, str] = {}
+        self._invoice_service: InvoiceService | None = None
 
     def get_config(self) -> MastercardConfig:
         return self._config
@@ -54,7 +55,16 @@ class MastercardProvider(Provider):
         self, page: Page, context: BrowserContext, account: Account
     ) -> Path:
         """page y context pueden ser None cuando se restaura desde sesión guardada."""
-        return await _download_invoice(self._config, self._token, self._cookies, account)
+        if self._invoice_service is None:
+            self._invoice_service = InvoiceService(
+                self._config, self._token, self._cookies
+            )
+        return await self._invoice_service.download_for_account(account)
+
+    async def close(self) -> None:
+        if self._invoice_service is not None:
+            await self._invoice_service.aclose()
+            self._invoice_service = None
 
     # ─── Session store ────────────────────────────────────────────────────────
 

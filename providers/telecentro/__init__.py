@@ -25,6 +25,7 @@ class TelecentroProvider(Provider):
     def __init__(self):
         self._config = TelecentroConfig()
         self._jwt: str = ""
+        self._invoice_service: InvoiceService | None = None
 
     def get_config(self) -> TelecentroConfig:
         return self._config
@@ -49,8 +50,14 @@ class TelecentroProvider(Provider):
         Internamente obtiene un JWT específico para la cuenta via refreshtokenByClient.
         page y context pueden ser None cuando se restaura desde sesión guardada.
         """
-        service = InvoiceService(self._config, self._jwt)
-        return await service.download_for_client(account)
+        if self._invoice_service is None:
+            self._invoice_service = InvoiceService(self._config, self._jwt)
+        return await self._invoice_service.download_for_client(account)
+
+    async def close(self) -> None:
+        if self._invoice_service is not None:
+            await self._invoice_service.aclose()
+            self._invoice_service = None
 
     # ─── Session store ────────────────────────────────────────────────────────
 

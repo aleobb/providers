@@ -14,50 +14,51 @@ class InvoiceService:
     def __init__(self, page: Page, config: AysaConfig):
         self.page = page
         self.config = config
+        self._client: httpx.AsyncClient | None = None
 
     async def download_for_client(self, client_number: str) -> Path:
         cookies = {c["name"]: c["value"] for c in await self.page.context.cookies()}
 
-        async with httpx.AsyncClient(cookies=cookies, follow_redirects=True, timeout=60, verify=False) as client:
-            # Paso 1: obtener token CSRF (requerido para las llamadas POST)
-            csrf_r = await client.get(
-                f"{self.config.api_base}/cuentas",
-                headers={"X-CSRF-Token": "Fetch"},
+        client = self._get_client(cookies)
+        # Paso 1: obtener token CSRF (requerido para las llamadas POST)
+        csrf_r = await client.get(
+            f"{self.config.api_base}/cuentas",
+            headers={"X-CSRF-Token": "Fetch"},
+        )
+        csrf_token = csrf_r.headers.get("X-CSRF-Token", "")
+
+        # Paso 2: listar facturas del contrato
+        invoices_r = await client.post(
+            f"{self.config.api_base}/facturacion/facturas/{client_number}",
+            headers={"X-CSRF-Token": csrf_token},
+        )
+        if invoices_r.status_code >= 400:
+            raise DownloadError(
+                f"HTTP {invoices_r.status_code} al obtener facturas para cuenta {client_number}"
             )
-            csrf_token = csrf_r.headers.get("X-CSRF-Token", "")
 
-            # Paso 2: listar facturas del contrato
-            invoices_r = await client.post(
-                f"{self.config.api_base}/facturacion/facturas/{client_number}",
-                headers={"X-CSRF-Token": csrf_token},
+        invoices = invoices_r.json()
+        if not invoices:
+            raise DownloadError(f"No se encontraron facturas para cuenta {client_number}")
+
+        # Paso 3: tomar la factura más reciente (mayor FAEDN)
+        invoices.sort(key=lambda x: x.get("FAEDN", ""), reverse=True)
+        latest = invoices[0]
+
+        exbel = latest["EXBEL"]          # e.g. "0111B04929123A"
+        numero_int = latest["NUMERO_INT"] # e.g. "0596507284"
+        period = latest.get("FAEDN", "sin-fecha")[:7]  # e.g. "2026-04"
+
+        # Paso 4: descargar el PDF
+        pdf_url = (
+            f"{self.config.api_base}/facturacion/factura/pdf"
+            f"/{client_number}/{numero_int}/{exbel}?action=download"
+        )
+        pdf_r = await client.get(pdf_url)
+        if pdf_r.status_code >= 400:
+            raise DownloadError(
+                f"HTTP {pdf_r.status_code} al descargar PDF para cuenta {client_number}"
             )
-            if invoices_r.status_code >= 400:
-                raise DownloadError(
-                    f"HTTP {invoices_r.status_code} al obtener facturas para cuenta {client_number}"
-                )
-
-            invoices = invoices_r.json()
-            if not invoices:
-                raise DownloadError(f"No se encontraron facturas para cuenta {client_number}")
-
-            # Paso 3: tomar la factura más reciente (mayor FAEDN)
-            invoices.sort(key=lambda x: x.get("FAEDN", ""), reverse=True)
-            latest = invoices[0]
-
-            exbel = latest["EXBEL"]          # e.g. "0111B04929123A"
-            numero_int = latest["NUMERO_INT"] # e.g. "0596507284"
-            period = latest.get("FAEDN", "sin-fecha")[:7]  # e.g. "2026-04"
-
-            # Paso 4: descargar el PDF
-            pdf_url = (
-                f"{self.config.api_base}/facturacion/factura/pdf"
-                f"/{client_number}/{numero_int}/{exbel}?action=download"
-            )
-            pdf_r = await client.get(pdf_url)
-            if pdf_r.status_code >= 400:
-                raise DownloadError(
-                    f"HTTP {pdf_r.status_code} al descargar PDF para cuenta {client_number}"
-                )
 
         dest_dir = self.config.ensure_output_dir()
         dest_path = unique_path(
@@ -65,3 +66,21 @@ class InvoiceService:
         )
         dest_path.write_bytes(pdf_r.content)
         return dest_path
+
+    def _get_client(self, cookies: dict[str, str]) -> httpx.AsyncClient:
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                cookies=cookies,
+                follow_redirects=True,
+                timeout=60,
+                verify=False,
+            )
+        else:
+            self._client.cookies.clear()
+            self._client.cookies.update(cookies)
+        return self._client
+
+    async def aclose(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None

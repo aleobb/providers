@@ -21,6 +21,7 @@ class InvoiceService:
     def __init__(self, page: Page, config: ClaroConfig):
         self.page = page
         self.config = config
+        self._client: httpx.AsyncClient | None = None
 
     async def download_for_account(self, account: Account) -> Path:
         factura_url = self._factura_url(account.client_number)
@@ -106,17 +107,26 @@ class InvoiceService:
 
     async def _fetch_pdf(self, url: str, dest_path: Path) -> None:
         cookies = {c["name"]: c["value"] for c in await self.page.context.cookies()}
-        async with httpx.AsyncClient(
-            cookies=cookies,
-            follow_redirects=True,
-            timeout=60,
-        ) as client:
-            r = await client.get(url)
-            if r.status_code >= 400:
-                raise DownloadError(
-                    f"HTTP {r.status_code} al descargar PDF de Claro desde {url}"
-                )
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                cookies=cookies,
+                follow_redirects=True,
+                timeout=60,
+            )
+        else:
+            self._client.cookies.clear()
+            self._client.cookies.update(cookies)
+        r = await self._client.get(url)
+        if r.status_code >= 400:
+            raise DownloadError(
+                f"HTTP {r.status_code} al descargar PDF de Claro desde {url}"
+            )
         dest_path.write_bytes(r.content)
+
+    async def aclose(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
 
 
 # ------------------------------------------------------------------ period parsing

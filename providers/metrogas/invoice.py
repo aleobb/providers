@@ -38,6 +38,7 @@ class InvoiceService:
         self.page = page
         self.config = config
         self._cookies: dict | None = None
+        self._client: httpx.AsyncClient | None = None
 
     async def _get_cookies(self) -> dict:
         if self._cookies is None:
@@ -55,13 +56,29 @@ class InvoiceService:
         )
         cookies = await self._get_cookies()
 
-        async with httpx.AsyncClient(
-            cookies=cookies, follow_redirects=True, timeout=60, verify=False
-        ) as client:
-            r = await client.get(pdf_url)
-            dest_path.write_bytes(_validated_pdf_content(r, client_number))
+        client = self._get_client(cookies)
+        r = await client.get(pdf_url)
+        dest_path.write_bytes(_validated_pdf_content(r, client_number))
 
         return dest_path
+
+    def _get_client(self, cookies: dict) -> httpx.AsyncClient:
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                cookies=cookies,
+                follow_redirects=True,
+                timeout=60,
+                verify=False,
+            )
+        else:
+            self._client.cookies.clear()
+            self._client.cookies.update(cookies)
+        return self._client
+
+    async def aclose(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
 
     async def _extract_period(self) -> str:
         body = await self.page.locator("body").inner_text()

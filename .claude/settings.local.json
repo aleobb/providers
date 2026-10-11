@@ -75,7 +75,7 @@
       "Bash(\"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\" repo view aleobb/documents-downloader --json name,description,url,visibility)",
       "Bash(python -c \"import providers.visa; print\\('OK'\\)\")",
       "Bash(dir \"C:\\\\Users\\\\Alejandro\\\\.finanzas\\\\_archive\\\\providers-diagnostics-2026-10-05\\\\visa_debug_dumps\\\\\")",
-      "Bash(python scripts/visa_test_switch.py)",
+      "Bash(python providers/visa/tests/visa_test_switch.py)",
       "Bash(python -c \"from providers.visa.config import VisaConfig; c = VisaConfig\\(\\); print\\('session_file:', c.session_file\\); print\\('exists:', c.session_file.exists\\(\\)\\)\")",
       "Bash(psql -U postgres -c \"\\\\l\")",
       "Bash(pg_isready)"

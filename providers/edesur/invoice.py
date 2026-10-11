@@ -4,6 +4,7 @@ import asyncio
 import sys
 from pathlib import Path
 
+import httpx
 from playwright.async_api import (
     BrowserContext,
     Locator,
@@ -21,6 +22,7 @@ class InvoiceService:
         self.page = page
         self.context = context
         self.config = config
+        self._client: httpx.AsyncClient | None = None
 
     async def download_for_client(self, client_number: str) -> Path:
         dest_dir = self.config.ensure_output_dir()
@@ -156,17 +158,20 @@ class InvoiceService:
                 await asyncio.sleep(5)
                 pdf_url = popup.url
                 if pdf_url and "pdf" in pdf_url.lower():
-                    import httpx
                     cookies = {
                         c["name"]: c["value"]
                         for c in await self.context.cookies()
                     }
-                    async with httpx.AsyncClient(
-                        cookies=cookies, follow_redirects=True, timeout=60
-                    ) as client:
-                        r = await client.get(pdf_url)
-                        if r.status_code < 400:
-                            return r.content
+                    if self._client is None:
+                        self._client = httpx.AsyncClient(
+                            cookies=cookies, follow_redirects=True, timeout=60
+                        )
+                    else:
+                        self._client.cookies.clear()
+                        self._client.cookies.update(cookies)
+                    r = await self._client.get(pdf_url)
+                    if r.status_code < 400:
+                        return r.content
                 raise DownloadError(
                     "No se pudo descargar la factura desde docuprint."
                 )
@@ -174,6 +179,11 @@ class InvoiceService:
         finally:
             if not popup.is_closed():
                 await popup.close()
+
+    async def aclose(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
 
     async def _wait_for_download_button(self, page: Page) -> Locator:
         download_btn = page.locator("#downloadBtn")

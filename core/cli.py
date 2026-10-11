@@ -3,9 +3,10 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
-from .accounts import select_account
+from .accounts import Account, select_account
 from .browser import BrowserSession
 from .exceptions import (
     CaptchaError,
@@ -24,6 +25,7 @@ from .registry import all_provider_names, all_providers, get_provider
 from .utils import dismiss_popups
 from . import run_log
 from integrations.pdf_extractor import determine_invoice_period
+from integrations.invoice_data_extractor import extract_invoice_data
 
 
 def parse_args() -> dict:
@@ -66,13 +68,126 @@ def parse_args() -> dict:
     return result
 
 
-async def _download_one(provider: Provider, page, context, account):
+async def _download_one(
+    provider: Provider, page, context, account, *, catch_all: bool = False
+):
     """Download one invoice, returning (path, error)."""
     try:
         path = await provider.download_invoice(page, context, account)
         return path, None
-    except InvoiceDownloaderError as e:
-        return None, e
+    except Exception as error:
+        if catch_all or isinstance(error, InvoiceDownloaderError):
+            return None, error
+        raise
+
+
+def _upload_if_enabled(
+    provider: Provider,
+    account,
+    period: str,
+    path: Path,
+    drive_uploader,
+    drive_root_id: str,
+) -> None:
+    if not drive_uploader or not drive_root_id:
+        return
+    banco = account.extra.get("banco", "") if account.extra else ""
+    from integrations.drive import upload_invoice_to_drive
+
+    upload_invoice_to_drive(
+        drive_uploader, drive_root_id, provider, period, path, banco
+    )
+
+
+def _record_download_success(
+    provider: Provider,
+    account,
+    path: Path,
+    drive_uploader,
+    drive_root_id: str,
+) -> None:
+    period = determine_invoice_period(path, provider.extract_invoice_date)
+    run_log.log_ok(provider.name, account.client_number, period, path)
+    invoice_data = extract_invoice_data(path, provider)
+    amount = f"{invoice_data.amount:.2f}" if invoice_data.amount is not None else "-"
+    current_due = invoice_data.current_due_date or "-"
+    next_due = invoice_data.next_due_date or "-"
+    text_status = (
+        "error de lectura"
+        if invoice_data.read_error
+        else (
+            "disponible"
+            if invoice_data.text_layer_available
+            else "no detectado; pdfplumber no aplica OCR"
+        )
+    )
+    print(
+        f"  Datos PDF: proveedor={invoice_data.provider_name}; "
+        f"importe={amount}; vencimiento_actual={current_due}; "
+        f"proximo_vto={next_due}; texto={text_status}"
+    )
+    _upload_if_enabled(
+        provider, account, period, path, drive_uploader, drive_root_id
+    )
+
+
+async def _download_all_accounts(
+    provider: Provider,
+    accounts: list,
+    page,
+    context,
+    drive_uploader,
+    drive_root_id: str,
+    *,
+    without_browser: bool,
+) -> bool:
+    results = []
+    for index, account in enumerate(accounts, 1):
+        label = (
+            f"[{index}/{len(accounts)}] N {account.client_number} - "
+            f"{account.display_name}"
+        )
+        print(f"{label} - descargando...")
+        path, error = await _download_one(
+            provider, page, context, account, catch_all=without_browser
+        )
+        if path:
+            print(f"  OK: {path.resolve()}")
+            if without_browser:
+                try:
+                    _record_download_success(
+                        provider, account, path, drive_uploader, drive_root_id
+                    )
+                except Exception as record_error:
+                    path, error = None, record_error
+            else:
+                _record_download_success(
+                    provider, account, path, drive_uploader, drive_root_id
+                )
+
+        if error:
+            print(f"  ERROR: {error}", file=sys.stderr)
+            run_log.log_error(provider.name, account.client_number, str(error))
+            if without_browser and provider.is_session_error(error):
+                from core import session_store
+
+                session_store.clear(provider.session_key)
+                print(
+                    "  [Session] Sesión invalidada — el próximo run hará login.",
+                    file=sys.stderr,
+                )
+            results.append((account, None, error))
+        else:
+            results.append((account, path, None))
+
+    ok = [result for result in results if result[1]]
+    failed = [result for result in results if result[2]]
+    print(f"\nResumen {provider.display_name}:")
+    for account, path, _ in ok:
+        print(f"  OK   N {account.client_number}: {path.name}")
+    for account, _, error in failed:
+        print(f"  FAIL N {account.client_number}: {error}", file=sys.stderr)
+    return not failed
 
 
 async def _run_provider_no_browser(
@@ -91,41 +206,15 @@ async def _run_provider_no_browser(
 
     if todas:
         print(f"\nDescargando facturas de {len(accounts)} cuenta(s) (sin browser)...\n")
-        results = []
-        for i, account in enumerate(accounts, 1):
-            label = f"[{i}/{len(accounts)}] N {account.client_number} - {account.display_name}"
-            print(f"{label} - descargando...")
-            try:
-                path = await provider.download_invoice(None, None, account)
-                print(f"  OK: {path.resolve()}")
-                period = determine_invoice_period(path, provider.extract_invoice_date)
-                run_log.log_ok(provider.name, account.client_number, period, path)
-                if drive_uploader and drive_root_id:
-                    banco = account.extra.get("banco", "") if account.extra else ""
-                    from integrations.drive import upload_invoice_to_drive
-                    upload_invoice_to_drive(
-                        drive_uploader, drive_root_id, provider, period, path, banco
-                    )
-                results.append((account, path, None))
-            except Exception as e:
-                print(f"  ERROR: {e}", file=sys.stderr)
-                run_log.log_error(provider.name, account.client_number, str(e))
-                results.append((account, None, e))
-                if provider.is_session_error(e):
-                    session_store.clear(provider.session_key)
-                    print(
-                        f"  [Session] Sesión invalidada — el próximo run hará login.",
-                        file=sys.stderr,
-                    )
-
-        ok = [r for r in results if r[1]]
-        fail = [r for r in results if r[2]]
-        print(f"\nResumen {provider.display_name}:")
-        for acc, path, _ in ok:
-            print(f"  OK   N {acc.client_number}: {path.name}")
-        for acc, _, err in fail:
-            print(f"  FAIL N {acc.client_number}: {err}", file=sys.stderr)
-        return len(fail) == 0
+        return await _download_all_accounts(
+            provider,
+            accounts,
+            None,
+            None,
+            drive_uploader,
+            drive_root_id,
+            without_browser=True,
+        )
 
     account = select_account(accounts, cuenta)
     if len(accounts) > 1:
@@ -139,18 +228,13 @@ async def _run_provider_no_browser(
             session_store.clear(provider.session_key)
         raise
     print(f"\nFactura descargada: {pdf_path.resolve()}")
-    period = determine_invoice_period(pdf_path, provider.extract_invoice_date)
-    run_log.log_ok(provider.name, account.client_number, period, pdf_path)
-    if drive_uploader and drive_root_id:
-        banco = account.extra.get("banco", "") if account.extra else ""
-        from integrations.drive import upload_invoice_to_drive
-        upload_invoice_to_drive(
-            drive_uploader, drive_root_id, provider, period, pdf_path, banco
-        )
+    _record_download_success(
+        provider, account, pdf_path, drive_uploader, drive_root_id
+    )
     return True
 
 
-async def run_provider(
+async def _run_provider(
     provider: Provider,
     debug: bool,
     listar: bool,
@@ -251,35 +335,15 @@ async def run_provider(
         # --todas
         if todas:
             print(f"\nDescargando facturas de {len(accounts)} cuenta(s)...\n")
-            results = []
-            for i, account in enumerate(accounts, 1):
-                label = f"[{i}/{len(accounts)}] N {account.client_number} - {account.display_name}"
-                print(f"{label} - descargando...")
-                path, err = await _download_one(provider, service_page, service_context, account)
-                if path:
-                    print(f"  OK: {path.resolve()}")
-                    period = determine_invoice_period(path, provider.extract_invoice_date)
-                    run_log.log_ok(provider.name, account.client_number, period, path)
-                    if drive_uploader and drive_root_id:
-                        banco = account.extra.get("banco", "") if account.extra else ""
-                        from integrations.drive import upload_invoice_to_drive
-                        upload_invoice_to_drive(
-                            drive_uploader, drive_root_id, provider, period, path, banco
-                        )
-                    results.append((account, path, None))
-                else:
-                    print(f"  ERROR: {err}", file=sys.stderr)
-                    run_log.log_error(provider.name, account.client_number, str(err))
-                    results.append((account, None, err))
-
-            ok = [r for r in results if r[1]]
-            fail = [r for r in results if r[2]]
-            print(f"\nResumen {provider.display_name}:")
-            for acc, path, _ in ok:
-                print(f"  OK   N {acc.client_number}: {path.name}")
-            for acc, _, err in fail:
-                print(f"  FAIL N {acc.client_number}: {err}", file=sys.stderr)
-            return len(fail) == 0
+            return await _download_all_accounts(
+                provider,
+                accounts,
+                service_page,
+                service_context,
+                drive_uploader,
+                drive_root_id,
+                without_browser=False,
+            )
 
         # Single account
         account = select_account(accounts, cuenta)
@@ -289,14 +353,9 @@ async def run_provider(
         print("Descargando ultima factura...")
         pdf_path = await provider.download_invoice(service_page, service_context, account)
         print(f"\nFactura descargada: {pdf_path.resolve()}")
-        period = determine_invoice_period(pdf_path, provider.extract_invoice_date)
-        run_log.log_ok(provider.name, account.client_number, period, pdf_path)
-        if drive_uploader and drive_root_id:
-            banco = account.extra.get("banco", "") if account.extra else ""
-            from integrations.drive import upload_invoice_to_drive
-            upload_invoice_to_drive(
-                drive_uploader, drive_root_id, provider, period, pdf_path, banco
-            )
+        _record_download_success(
+            provider, account, pdf_path, drive_uploader, drive_root_id
+        )
         return True
 
       finally:
@@ -305,6 +364,36 @@ async def run_provider(
             await provider.logout(session.page, session.context)
         except Exception as e:
             print(f"  [logout] {provider.name}: {e}", file=sys.stderr)
+
+
+async def run_provider(
+    provider: Provider,
+    debug: bool,
+    listar: bool,
+    todas: bool,
+    cuenta: str | None,
+    url: str | None = None,
+    drive_uploader=None,
+    drive_root_id: str = "",
+    nosession: bool = False,
+    credential_store: CredentialStore | None = None,
+) -> bool:
+    """Run a single provider and release its resources."""
+    try:
+        return await _run_provider(
+            provider,
+            debug,
+            listar,
+            todas,
+            cuenta,
+            url=url,
+            drive_uploader=drive_uploader,
+            drive_root_id=drive_root_id,
+            nosession=nosession,
+            credential_store=credential_store,
+        )
+    finally:
+        await provider.close()
 
 
 async def run(

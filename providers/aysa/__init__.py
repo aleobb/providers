@@ -24,6 +24,7 @@ class AysaProvider(Provider):
 
     def __init__(self):
         self._config = AysaConfig()
+        self._invoice_service: InvoiceService | None = None
 
     def get_config(self) -> AysaConfig:
         return self._config
@@ -38,8 +39,14 @@ class AysaProvider(Provider):
     async def download_invoice(
         self, page: Page, context: BrowserContext, account: Account
     ) -> Path:
-        service = InvoiceService(page, self._config)
-        return await service.download_for_client(account.client_number)
+        if self._invoice_service is None:
+            self._invoice_service = InvoiceService(page, self._config)
+        return await self._invoice_service.download_for_client(account.client_number)
+
+    async def close(self) -> None:
+        if self._invoice_service is not None:
+            await self._invoice_service.aclose()
+            self._invoice_service = None
 
 
 register(AysaProvider)

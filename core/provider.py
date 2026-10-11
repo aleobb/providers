@@ -31,6 +31,7 @@ class Provider(ABC):
     requires_credentials: ClassVar[bool] = True
     can_resume_session: ClassVar[bool] = False
     invoice_date_patterns: ClassVar[tuple[str, ...]] = ()
+    invoice_data_patterns: ClassVar[Mapping[str, tuple[str, ...]]] = {}
     credential_fields: ClassVar[tuple[CredentialField, ...]] = (
         CredentialField("email", "Email"),
         CredentialField("password", "Contraseña", secret=True),
@@ -109,3 +110,6 @@ class Provider(ABC):
 
     async def logout(self, page: Page, context: BrowserContext) -> None:
         """Close the portal session; providers may override this."""
+
+    async def close(self) -> None:
+        """Release provider-owned resources after a run."""

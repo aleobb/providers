@@ -29,6 +29,8 @@ visa_switch_test/
 
 # Python
 __pycache__/
+.pytest_cache/
+.tmp/
 *.py[cod]
 *.pyo
 *.pyd

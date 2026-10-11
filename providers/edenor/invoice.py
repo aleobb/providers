@@ -59,6 +59,7 @@ class InvoiceService:
         # Credenciales guardadas (path sin browser)
         self._saved_cookies = saved_cookies
         self._saved_token = saved_token
+        self._client: httpx.AsyncClient | None = None
 
     async def _get_cookies_and_token(self) -> tuple[dict, str]:
         """Devuelve (cookies_dict, raw_token) ya sea desde browser o sesión guardada."""
@@ -83,11 +84,8 @@ class InvoiceService:
     async def download_latest(self, account_id: str, client_number: str) -> Path:
         cookies, raw_token = await self._get_cookies_and_token()
         headers = self._build_headers(raw_token)
-
-        async with httpx.AsyncClient(
-            cookies=cookies, headers=headers, follow_redirects=True, timeout=60
-        ) as client:
-            bill = await self._fetch_last_bill(client, account_id)
+        client = self._get_client(cookies, headers)
+        bill = await self._fetch_last_bill(client, account_id)
 
         dest_dir = self.config.ensure_output_dir()
         period = _period_str(bill)
@@ -99,10 +97,8 @@ class InvoiceService:
             if not external_id:
                 raise DownloadError("No se encontró el external_id en la factura.")
             cookies2, _ = await self._get_cookies_and_token()
-            async with httpx.AsyncClient(
-                cookies=cookies2, headers=headers, follow_redirects=True, timeout=60
-            ) as client2:
-                return await self._api_download(client2, client_number, external_id, dest_path)
+            client = self._get_client(cookies2, headers)
+            return await self._api_download(client, client_number, external_id, dest_path)
 
         # Con browser: lógica original
         page_content = await self.page.content()
@@ -113,10 +109,29 @@ class InvoiceService:
             if not external_id:
                 raise DownloadError("No se encontró el external_id en la factura.")
             cookies2 = {c["name"]: c["value"] for c in await self.context.cookies()}
-            async with httpx.AsyncClient(
-                cookies=cookies2, headers=headers, follow_redirects=True, timeout=60
-            ) as client2:
-                return await self._api_download(client2, client_number, external_id, dest_path)
+            client = self._get_client(cookies2, headers)
+            return await self._api_download(client, client_number, external_id, dest_path)
+
+    def _get_client(
+        self, cookies: dict[str, str], headers: dict[str, str]
+    ) -> httpx.AsyncClient:
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                cookies=cookies,
+                headers=headers,
+                follow_redirects=True,
+                timeout=60,
+            )
+        else:
+            self._client.cookies.clear()
+            self._client.cookies.update(cookies)
+            self._client.headers.update(headers)
+        return self._client
+
+    async def aclose(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
 
     async def _fetch_last_bill(self, client: httpx.AsyncClient, account_id: str) -> dict:
         url = f"{self.config.api_base}/accounts/{account_id}/bills/last"

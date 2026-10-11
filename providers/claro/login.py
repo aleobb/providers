@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import re
 from urllib.parse import urlsplit
 
 from playwright.async_api import (
@@ -14,6 +12,7 @@ from playwright.async_api import (
 )
 
 from core.exceptions import LoginError, NavigationError
+from core.network_diagnostics import NetworkDiagnostics
 from .config import ClaroConfig
 
 
@@ -27,6 +26,12 @@ class LoginOrchestrator:
     def __init__(self, page: Page, config: ClaroConfig):
         self.page = page
         self.config = config
+        self._network_diagnostics = NetworkDiagnostics(
+            ("claro.com.ar", "claro.com", "claro.com.br"),
+            include_subdomains=True,
+            redact_long_path_segments=True,
+            redact_emails=True,
+        )
         self._email_submitted = False
         self._requests: list[str] = []
         self._responses: list[str] = []
@@ -306,11 +311,7 @@ class LoginOrchestrator:
         )
 
     def _is_claro_request(self, url: str) -> bool:
-        hostname = (urlsplit(url).hostname or "").lower()
-        return any(
-            hostname == domain or hostname.endswith(f".{domain}")
-            for domain in ("claro.com.ar", "claro.com", "claro.com.br")
-        )
+        return self._network_diagnostics.matches_domain(url)
 
     def _is_authenticated_portal_url(self, url: str) -> bool:
         current_url = urlsplit(url)
@@ -321,60 +322,27 @@ class LoginOrchestrator:
         )
 
     def _safe_url(self, url: str) -> str:
-        parsed_url = urlsplit(url)
-        hostname = parsed_url.hostname or "(unknown-host)"
-        safe_path = re.sub(
-            r"/[^/]{32,}",
-            "/[redacted]",
-            parsed_url.path,
-        )
-        return f"{hostname}{safe_path}"
+        return self._network_diagnostics.safe_url(url)
 
     def _summarize_body(self, body: str, content_type: str) -> str:
-        if not body:
-            return "body=(empty)"
-        if "json" in content_type.lower():
-            try:
-                payload = json.loads(body)
-            except json.JSONDecodeError:
-                payload = None
-            if isinstance(payload, dict):
-                keys = ",".join(str(key) for key in list(payload)[:15])
-                safe_values = []
-                for key in (
-                    "error",
-                    "message",
-                    "error_description",
-                    "code",
-                    "requestId",
-                    "correlationId",
-                    "traceId",
-                    "title",
-                    "status",
-                ):
-                    value = payload.get(key)
-                    if isinstance(value, (str, int, float, bool)):
-                        safe_values.append(f"{key}={self._redact(str(value)[:120])}")
-                details = f"json-keys={keys or '(none)'}"
-                if safe_values:
-                    details += f"; json-details={','.join(safe_values)}"
-                return details
-        text = " ".join(body.split())
-        return f"body-text={self._redact(text[:180])}"
+        return self._network_diagnostics.summarize_body(
+            body,
+            content_type,
+            (
+                "error",
+                "message",
+                "error_description",
+                "code",
+                "requestId",
+                "correlationId",
+                "traceId",
+                "title",
+                "status",
+            ),
+            (self.config.email, self.config.password),
+        )
 
     def _redact(self, value: str) -> str:
-        for secret in (self.config.email, self.config.password):
-            if secret:
-                value = value.replace(secret, "[redacted]")
-        value = re.sub(
-            r"eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9_-]*)?",
-            "[redacted-jwt]",
-            value,
+        return self._network_diagnostics.redact(
+            value, (self.config.email, self.config.password)
         )
-        value = re.sub(
-            r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b",
-            "[redacted-email]",
-            value,
-            flags=re.IGNORECASE,
-        )
-        return value

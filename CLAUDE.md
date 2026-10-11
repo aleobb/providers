@@ -10,19 +10,27 @@ Script Python para loguearse en portales web de proveedores de servicios (con us
 <raiz-del-proyecto>\
 ├── main.py                          # Entry point -> core.cli.main()
 ├── scripts/                         # Herramientas de diagnóstico de Visa
-├── .env                             # Credenciales por proveedor
+├── .env                             # Configuracion no secreta
+├── .credentials/                    # SQLite con perfiles cifrados (gitignoreado)
 ├── requirements.txt                 # playwright, python-dotenv, httpx, pydantic-settings, tenacity
 ├── core/
 │   ├── __init__.py
 │   ├── accounts.py                  # Account dataclass + select_account()
 │   ├── browser.py                   # BrowserSession (system Chrome via channel="chrome")
 │   ├── cli.py                       # CLI unificado (--proveedor, --todas, --listar, --debug, --cuenta)
-│   ├── config.py                    # BaseProviderConfig (pydantic-settings)
+│   ├── config.py                    # BaseProviderConfig; credenciales inyectadas desde SQLite
+│   ├── credential_store.py          # Perfiles cifrados de credenciales por proveedor
+│   ├── credential_cli.py            # Gestor interactivo de perfiles
 │   ├── exceptions.py                # Jerarquia de errores (InvoiceDownloaderError, LoginError, ServerUnavailableError, etc.)
 │   ├── provider.py                  # Protocol con 4 metodos: get_config, login, fetch_accounts, download_invoice
 │   ├── registry.py                  # Provider registry con register(), get_provider(), all_providers()
 │   ├── run_log.py                   # Log persistente de ejecuciones (./ejecucion.log)
 │   └── utils.py                     # unique_path() para evitar sobreescribir archivos
+├── integrations/
+│   ├── drive.py                     # Subida de facturas a Google Drive
+│   ├── drive_naming.py              # Rutas y nombres de archivos para Drive
+│   ├── gmail_reader.py              # Deteccion de enlaces de Docuprint en Gmail
+│   └── pdf_extractor.py             # Extraccion de fecha y período desde facturas PDF
 ├── providers/
 │   ├── __init__.py                  # Auto-import de todos los proveedores (trigger register())
 │   ├── edenor/                      # Proveedor Edenor
@@ -40,9 +48,11 @@ Script Python para loguearse en portales web de proveedores de servicios (con us
 - **Provider Protocol** (`core/provider.py`): interfaz runtime_checkable con 4 metodos
 - **Provider Registry** (`core/registry.py`): dict name->class con register()
 - **Auto-registration**: cada `providers/<nombre>/__init__.py` llama `register()` al importarse
-- **pydantic-settings BaseSettings**: config con env_prefix por proveedor (EDENOR_, METROGAS_, EDESUR_, MASTERCARD_, etc.)
+- **pydantic-settings BaseSettings**: opciones no secretas de configuración por proveedor; las credenciales de acceso se inyectan desde perfiles en SQLite.
 - **ServerUnavailableError** (`core/exceptions.py`): excepcion para errores transitorios de servidor → se loguea y continua con el siguiente proveedor
 - **Run Log** (`core/run_log.py`): log persistente append-only en `./ejecucion.log` con estado de cada descarga (OK/ERROR/SERVER_DOWN)
+- **Credenciales** (`core/credential_store.py`): perfiles múltiples por proveedor en SQLite; se cifran con Fernet usando `PROVIDERS_CREDENTIALS_KEY`, fuera de la base. `--gestionar-credenciales` administra perfiles y la migración desde `.env` se ejecuta una sola vez.
+- **Integraciones auxiliares** (`integrations/`): funciones de Gmail, Google Drive y extraccion de fechas de PDF, separadas del núcleo de descarga.
 
 ### Decisiones Tecnicas Clave
 - **Playwright async** para automatizacion del browser (necesario por captchas y flujos complejos)
@@ -109,7 +119,7 @@ Script Python para loguearse en portales web de proveedores de servicios (con us
 - **Health check**: `/health` → status DOWN indica outage del backend DB (causa HTTP 500 en todos los endpoints)
 - **OTP**: 6 digitos por email. Se ingresa en consola. Expira ~2 minutos
 - **Deteccion de servidor caido**: si el body contiene "intentá nuevamente", "error inesperado", etc. → lanza `ServerUnavailableError` en vez de esperar 60s
-- **Credenciales .env**: `VISA_DOCUMENTO_NACIONAL_DE_IDENTIDAD`, `VISA_USUARIO`, `VISA_PASSWORD`
+- **Credenciales**: DNI, usuario y contraseña se seleccionan desde un perfil cifrado de SQLite.
 - **Estado**: implementado, pero el backend de Prisma esta intermitentemente caido (HTTP 500 en /api/auth/login, /health → DB DOWN)
 
 ### Mastercard / Mis Consultas (misconsultas.com.ar)
@@ -124,27 +134,15 @@ Script Python para loguearse en portales web de proveedores de servicios (con us
 - **Cookies**: las llamadas httpx deben incluir las cookies del browser context (necesarias junto con el Bearer token)
 - **Archivo PDF**: `mastercard_{statementDate}_{last4}_resumen.pdf`
 - **Tarjetas sin resumen**: algunas tarjetas (ej. adicionales sin actividad) retornan summaries vacio → `InvoiceNotFoundError`
-- **Credenciales .env**: `MASTERCARD_EMAIL`, `MASTERCARD_PASSWORD`
-- **Cuidado**: el .env tenia `Mastercard__PASSWORD` (doble underscore) que no matcheaba el env_prefix — corregido a `MASTERCARD_PASSWORD`
+- **Credenciales**: email y contraseña se seleccionan desde un perfil cifrado de SQLite.
 
-## Variables de Entorno (.env)
+## Configuración y secretos
 ```
-EDENOR_EMAIL=...
-EDENOR_PASSWORD=...
-METROGAS_EMAIL=...
-METROGAS_PASSWORD=...
-EDESUR_EMAIL=...
-EDESUR_PASSWORD=...
-TELECENTRO_EMAIL=...
-TELECENTRO_PASSWORD=...
-CLARO_EMAIL=...
-CLARO_PASSWORD=...
-VISA_DOCUMENTO_NACIONAL_DE_IDENTIDAD=...
-VISA_USUARIO=...
-VISA_PASSWORD=...
-MASTERCARD_EMAIL=...
-MASTERCARD_PASSWORD=...
+PROVIDERS_CREDENTIALS_KEY=<variable de entorno externa; no guardar en SQLite>
+GOOGLE_DRIVE_FOLDER_ID=<opcional>
+GOOGLE_SERVICE_ACCOUNT_JSON=<opcional>
 ```
+La base cifrada vive en `.credentials/providers.sqlite3`; ejecutar `python main.py --gestionar-credenciales` para crear y administrar perfiles. La migración heredada de `.env` se ejecuta una vez y elimina del archivo las líneas de credenciales.
 
 ## Uso
 ```bash
@@ -182,7 +180,7 @@ python main.py --proveedor edenor --debug --todas
 - **Telecentro misma factura en cuentas distintas**: sintoma de que el `clienteId` del query param se esta ignorando. La API filtra por sesion del browser — hay que switchear la cuenta activa en la UI (tarjeta "Número de cliente" con icono ↺) antes de llamar la API o interceptar el response del portal
 - **Portales multi-cuenta con API session-based**: patron general — si pasar el ID como query param no cambia el resultado, la API depende de un "current account" server-side. Solucion: manipular la UI para switchear la cuenta activa antes de consumir la API, o interceptar los responses que el portal hace naturalmente (patron `NetworkInterceptor`)
 - **Visa backend caido (HTTP 500)**: el healthcheck `/health` confirma DB DOWN. Hasta que Prisma lo restaure, el script lanza `ServerUnavailableError`, lo loguea en `ejecucion.log` y continua. NO es problema de credenciales
-- **Mastercard doble underscore en .env**: `Mastercard__PASSWORD` (doble _) no matchea `env_prefix="MASTERCARD_"`. Debe ser `MASTERCARD_PASSWORD` (un solo _)
+- **Credenciales heredadas**: las credenciales de los portales se guardan en perfiles cifrados de SQLite; no agregarlas a `.env`.
 - **Mastercard sin sesión válida**: ingresa en consola el código vigente de la app Authenticator cuando se solicite; no requiere `--debug`
 - **`--nosession`**: omite la sesión API guardada, inicia el browser con un perfil temporal vacío y no reemplaza la sesión guardada ni el perfil habitual. El perfil temporal se elimina al finalizar el comando.
 - **UnicodeEncodeError en consola Windows (cp1252)**: no usar caracteres Unicode especiales (box drawing, tildes) en `print()`. Usar ASCII simple para banners
@@ -195,4 +193,4 @@ python main.py --proveedor edenor --debug --todas
 5. Crear `invoice.py` con logica de descarga de PDF
 6. Crear `__init__.py` con clase Provider que implemente los 4 metodos y llame `register("<nombre>", ProviderClass)`
 7. Agregar `from . import <nombre>` en `providers/__init__.py`
-8. Agregar credenciales en `.env`: `<NOMBRE>_EMAIL=...`, `<NOMBRE>_PASSWORD=...`
+8. Agregar los campos requeridos al esquema `PROVIDER_CREDENTIAL_FIELDS` en `core/credential_store.py` para incluir el proveedor en el gestor de perfiles.

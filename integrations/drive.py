@@ -3,11 +3,16 @@ from __future__ import annotations
 import io
 import json
 import os
+import sys
 from pathlib import Path
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
+
+from core.provider import Provider
+
+from .drive_naming import get_drive_target
 
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 
@@ -128,3 +133,26 @@ class DriveUploader:
         )
         files = results.get("files", [])
         return files[0]["id"] if files else None
+
+
+def upload_invoice_to_drive(
+    uploader: DriveUploader,
+    root_folder_id: str,
+    provider: Provider,
+    period: str,
+    path: Path,
+    banco: str = "",
+) -> None:
+    """Sube una factura a Drive sin interrumpir la descarga si falla la integración."""
+    try:
+        target = get_drive_target(provider, period, banco=banco)
+        file_id = uploader.upload_to_path(
+            path, root_folder_id, target.subfolder_parts, target.filename
+        )
+        drive_path = "/".join(target.subfolder_parts + [target.filename])
+        if file_id:
+            print(f"  Drive: {drive_path} ✓")
+        else:
+            print(f"  Drive: {drive_path} (ya existía)")
+    except Exception as e:
+        print(f"  [Drive] Error al subir {path.name}: {e}", file=sys.stderr)

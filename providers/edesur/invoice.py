@@ -31,7 +31,7 @@ class InvoiceService:
             creds_file = _Path(self.config.gmail_credentials_file)
             if creds_file.exists():
                 try:
-                    from core.gmail_reader import find_docuprint_url
+                    from .gmail_reader import find_docuprint_url
                     url = find_docuprint_url(
                         credentials_file=creds_file,
                         token_file=_Path(self.config.gmail_token_file),

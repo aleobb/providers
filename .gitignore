@@ -6,6 +6,7 @@ visa_session.json
 
 # Sesiones guardadas por session_store.py (tokens JWT, cookies)
 .sessions/
+.credentials/
 
 # Facturas descargadas (datos personales)
 facturas/

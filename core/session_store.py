@@ -5,14 +5,8 @@ Persiste credenciales de sesión por proveedor para evitar el login al browser.
 Los archivos se guardan en <repo_root>/.sessions/<provider>.json (gitignoreado).
 
 Flujo de uso:
-    # Al terminar el login con browser:
-    session_store.save("telecentro", {"jwt": jwt, "accounts": session_store.accounts_to_list(accounts)})
-
-    # Al comenzar la próxima ejecución:
-    data = session_store.load("telecentro")
-    if data and session_store.jwt_is_valid(data["jwt"]):
-        accounts = session_store.accounts_from_list(data["accounts"])
-        # ... descargar sin browser
+    session_store.save(provider_key, session_data)
+    data = session_store.load(provider_key)
 """
 from __future__ import annotations
 

@@ -263,8 +263,7 @@ class LoginOrchestrator:
                     if txt in body:
                         raise LoginError(
                             "Visa: credenciales incorrectas. "
-                            "Verificar VISA_DOCUMENTO_NACIONAL_DE_IDENTIDAD, "
-                            "VISA_USUARIO y VISA_PASSWORD en .env"
+                            "Verifica el perfil guardado en el gestor de credenciales."
                         )
                 for txt in _SERVER_DOWN_TEXTS:
                     if txt in body:

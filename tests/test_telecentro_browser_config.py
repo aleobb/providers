@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from core import cli
 from core.browser import BrowserSession
 from core.config import BaseProviderConfig
+from core.provider import Provider
 from providers.telecentro.config import TelecentroConfig
 
 
@@ -107,9 +108,10 @@ def test_run_provider_nosession_skips_saved_session_and_session_persistence(
         display=lambda _index: "Test account",
     )
 
-    class FakeProvider:
+    class FakeProvider(Provider):
         name = "telecentro"
         display_name = "Telecentro"
+        requires_credentials = False
 
         def get_config(self):
             return SimpleNamespace(
@@ -123,6 +125,9 @@ def test_run_provider_nosession_skips_saved_session_and_session_persistence(
 
         async def fetch_accounts(self, _page, _context):
             return [account]
+
+        async def download_invoice(self, _page, _context, _account):
+            raise NotImplementedError
 
         async def save_session(self, _page, _context, _accounts):
             raise AssertionError("--nosession must not persist a session")

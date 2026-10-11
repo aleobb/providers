@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from playwright.async_api import BrowserContext, Page
 
 from core.accounts import Account
+from core.provider import Provider
 from core.registry import register
 from .accounts import fetch_accounts as _fetch_accounts
 from .config import MastercardConfig
@@ -12,9 +14,15 @@ from .invoice import download_invoice as _download_invoice
 from .login import do_login
 
 
-class MastercardProvider:
+class MastercardProvider(Provider):
     name = "mastercard"
     display_name = "Mastercard (Mis Consultas)"
+    can_resume_session = True
+    invoice_date_patterns = (
+        r"fecha\s+de\s+cierre\s*[:\-]?\s*(\d{2})[/\-](\d{2})[/\-](\d{4})",
+        r"cierre\s*[:\-]\s*(\d{2})[/\-](\d{2})[/\-](\d{4})",
+        r"resumen\s+al\s+(\d{2})[/\-](\d{2})[/\-](\d{4})",
+    )
 
     def __init__(self):
         self._config = MastercardConfig()
@@ -23,6 +31,16 @@ class MastercardProvider:
 
     def get_config(self) -> MastercardConfig:
         return self._config
+
+    def drive_target(
+        self, period: str, banco: str = ""
+    ) -> tuple[tuple[str, ...], str]:
+        bank_name = banco or os.environ.get("MASTERCARD_BANCO", "")
+        filename = f"Mastercard {bank_name} - Resumen F.Cierre {period}.pdf".strip()
+        folders = ["Tarjetas de Credito", "Mastercard"]
+        if bank_name:
+            folders.append(bank_name)
+        return tuple(folders), filename
 
     async def login(self, page: Page, context: BrowserContext) -> None:
         self._token = await do_login(page, context, self._config)
@@ -64,7 +82,7 @@ class MastercardProvider:
     ) -> None:
         """Guarda token + cookies + cuentas para evitar el OTP en próximas ejecuciones."""
         from core import session_store
-        session_store.save(self.name, {
+        session_store.save(self.session_key, {
             "token": self._token,
             "cookies": self._cookies,
             "accounts": session_store.accounts_to_list(accounts),
@@ -72,4 +90,4 @@ class MastercardProvider:
         print("  [Mastercard] Sesión guardada.")
 
 
-register("mastercard", MastercardProvider)
+register(MastercardProvider)

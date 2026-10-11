@@ -28,7 +28,7 @@
       "Bash(curl -s -H \"User-Agent: Mozilla/5.0\" \"https://asskova9q.accounts.ondemand.com/ui/public/setTargetUrl\")",
       "Bash(python metrogas_main.py --debug)",
       "Bash(python metrogas_main.py)",
-      "Bash(ls -lh \"/c/Users/Alejandro/.claude/Code/facturas/metrogas\"*)",
+      "Bash(ls -lh \"/c/Users/Alejandro/.finanzas/providers/facturas/metrogas\"*)",
       "Bash(python metrogas_main.py --todas)",
       "Bash(python -c \"import providers; from core.registry import all_provider_names; print\\('Proveedores registrados:', all_provider_names\\(\\)\\)\")",
       "Bash(mkdir -p _legacy)",
@@ -54,7 +54,7 @@
       "Bash(python -c \"import sys; sys.stdout.reconfigure\\(encoding='utf-8'\\); exec\\(open\\('main.py'\\).read\\(\\)\\)\" --proveedor visa --debug --listar)",
       "Bash(python -c ' *)",
       "Bash(python -c \"import ast, pathlib; ast.parse\\(pathlib.Path\\('providers/visa/login.py'\\).read_text\\(encoding='utf-8'\\)\\); print\\('OK'\\)\")",
-      "Bash(del \"C:\\\\Users\\\\Alejandro\\\\.claude\\\\Code\\\\providers\\\\visa\\\\visa_session.json\")",
+      "Bash(del \"C:\\\\Users\\\\Alejandro\\\\.finanzas\\\\providers\\\\providers\\\\visa\\\\visa_session.json\")",
       "Bash(python -c \"import ast, pathlib; ast.parse\\(pathlib.Path\\('providers/visa/invoice.py'\\).read_text\\(encoding='utf-8'\\)\\); print\\('OK'\\)\")",
       "Bash(not exist *)",
       "Bash(gh auth *)",
@@ -66,7 +66,19 @@
       "Bash(winget --version)",
       "Bash(curl --version)",
       "Bash(powershell -Command \"git config --global user.name; git config --global user.email; [System.Environment]::GetEnvironmentVariable\\('GITHUB_TOKEN'\\)\")",
-      "Bash(winget install *)"
+      "Bash(winget install *)",
+      "Bash(powershell -Command \"& 'C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe' auth status 2>&1\")",
+      "Bash(powershell -Command \"cmdkey /list | Select-String github\")",
+      "Bash(powershell -Command ' *)",
+      "Bash(\"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\" repo create facturas-downloader --private --description \"Descarga automatica de facturas PDF desde portales de Edenor, Edesur, Metrogas, Telecentro, Claro, Visa y Mastercard\" --source . --remote origin --push)",
+      "Bash(\"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\" repo rename documents-downloader --repo aleobb/facturas-downloader --yes)",
+      "Bash(\"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\" repo view aleobb/documents-downloader --json name,description,url,visibility)",
+      "Bash(python -c \"import providers.visa; print\\('OK'\\)\")",
+      "Bash(dir \"C:\\\\Users\\\\Alejandro\\\\.finanzas\\\\_archive\\\\providers-diagnostics-2026-10-05\\\\visa_debug_dumps\\\\\")",
+      "Bash(python scripts/visa_test_switch.py)",
+      "Bash(python -c \"from providers.visa.config import VisaConfig; c = VisaConfig\\(\\); print\\('session_file:', c.session_file\\); print\\('exists:', c.session_file.exists\\(\\)\\)\")",
+      "Bash(psql -U postgres -c \"\\\\l\")",
+      "Bash(pg_isready)"
     ]
   }
 }

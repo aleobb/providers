@@ -16,21 +16,6 @@ class VisaConfig(BaseProviderConfig):
         extra="ignore",
     )
 
-    # La base requiere email/password; sobreescribimos email como no-requerido
-    email: str = Field("", description="No usado en Visa (usa documento + usuario)")
-
-    # Credenciales específicas de Visa/Prisma
-    documento_nacional_de_identidad: str = Field(
-        ..., description="Número de DNI"
-    )
-    usuario: str = Field(..., description="Nombre de usuario del portal")
-    # password heredado de BaseProviderConfig (→ VISA_PASSWORD)
-
-    # Si se especifica, solo se descargan las tarjetas donde el titular contiene este texto.
-    # Dejar vacio para descargar todas.
-    # Ej: VISA_TITULAR=Alejandro Osvaldo Ben
-    titular: str = Field("", description="Nombre del titular para filtrar tarjetas (opcional)")
-
     portal_url: str = Field(
         "https://mistarjetas.prismamediosdepago.com/socios/app/landing",
         description="URL del dashboard post-login",
@@ -43,3 +28,15 @@ class VisaConfig(BaseProviderConfig):
         default_factory=lambda: Path(__file__).parent / "visa_session.json",
         description="Archivo JSON donde se persisten las cookies de sesión",
     )
+
+    @property
+    def documento_nacional_de_identidad(self) -> str:
+        return self._credential_values.get("documento_nacional_de_identidad", "")
+
+    @property
+    def usuario(self) -> str:
+        return self._credential_values.get("usuario", "")
+
+    @property
+    def titular(self) -> str:
+        return self._credential_values.get("titular", "")

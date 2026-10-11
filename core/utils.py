@@ -25,10 +25,8 @@ async def dismiss_popups(page, *, label: str = "") -> int:
     Busca botones de cierre/rechazo ESPECIFICOS y hace click en el primero visible.
     Retorna la cantidad de popups cerrados.
 
-    IMPORTANTE: los selectores deben ser muy especificos. No usar patrones como
-    `button[class*="close"]` o `a:has-text("cerrar")` porque matchean botones de
-    navegacion normales (ej. dropit.js en el portal Visa crea menus con clases
-    tipo `*-layer` que seran interpretadas como modales).
+    IMPORTANTE: los selectores deben ser muy especificos para evitar que
+    coincidan con controles de navegacion normales.
     """
     _DISMISS_SELECTORS = [
         # Botones de cierre con aria-label EXACTO (muy especifico)

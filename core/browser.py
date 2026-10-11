@@ -43,7 +43,7 @@ class BrowserSession:
             if not profile_dir.is_dir():
                 raise FileNotFoundError(
                     f"No se encontró el perfil de Chrome configurado: {profile_dir}. "
-                    "Configura TELECENTRO_BROWSER_USER_DATA_DIR o restaura el perfil local."
+                    "Configura browser_user_data_dir o restaura el perfil local."
                 )
         else:
             profile_dir = _PROFILES_BASE / self.profile_name

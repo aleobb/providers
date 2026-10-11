@@ -5,6 +5,7 @@ from pathlib import Path
 from playwright.async_api import BrowserContext, Page
 
 from core.accounts import Account
+from core.provider import Provider
 from core.registry import register
 from .accounts import fetch_accounts as _fetch_accounts
 from .config import TelecentroConfig
@@ -12,9 +13,14 @@ from .invoice import InvoiceService
 from .login import LoginOrchestrator
 
 
-class TelecentroProvider:
+class TelecentroProvider(Provider):
     name = "telecentro"
     display_name = "Telecentro"
+    can_resume_session = True
+    invoice_date_patterns = (
+        r"vencimiento\s+(\d{2})[/\-](\d{2})[/\-](\d{4})",
+        r"fecha.+?vencimiento\s*[:\-]?\s*(\d{2})[/\-](\d{2})[/\-](\d{4})",
+    )
 
     def __init__(self):
         self._config = TelecentroConfig()
@@ -69,11 +75,11 @@ class TelecentroProvider:
     ) -> None:
         """Guarda JWT + cuentas para evitar login en próximas ejecuciones."""
         from core import session_store
-        session_store.save(self.name, {
+        session_store.save(self.session_key, {
             "jwt": self._jwt,
             "accounts": session_store.accounts_to_list(accounts),
         })
         print("  [Telecentro] Sesión guardada.")
 
 
-register("telecentro", TelecentroProvider)
+register(TelecentroProvider)

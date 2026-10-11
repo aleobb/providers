@@ -7,6 +7,7 @@ import httpx
 from playwright.async_api import BrowserContext, Page
 
 from core.accounts import Account
+from core.provider import Provider
 from core.registry import register
 from core.utils import unique_path
 from .accounts import fetch_accounts as _fetch_accounts
@@ -20,9 +21,14 @@ from .invoice import (
 from .login import LoginOrchestrator
 
 
-class MetrogasProvider:
+class MetrogasProvider(Provider):
     name = "metrogas"
     display_name = "Metrogas"
+    can_resume_session = True
+    invoice_date_patterns = (
+        r"fecha\s+de\s+emisi.n\s*[:\-]?\s*(\d{2})[/\-](\d{2})[/\-](\d{4})",
+        r"emisi.n\s*[:\-]?\s*(\d{2})[/\-](\d{2})[/\-](\d{4})",
+    )
 
     def __init__(self):
         self._config = MetrogasConfig()
@@ -44,7 +50,7 @@ class MetrogasProvider:
         """
         Descarga la factura del cliente indicado.
         Si page es None (sesión restaurada), usa cookies guardadas vía httpx directo.
-        El período queda como 'sin-fecha' y se corrige luego por pdf_extractor.
+        El período queda como 'sin-fecha' y se corrige luego por integrations.pdf_extractor.
         """
         if page is None:
             return await self._download_no_browser(account.client_number)
@@ -54,7 +60,7 @@ class MetrogasProvider:
     async def _download_no_browser(self, client_number: str) -> Path:
         """Descarga directa vía httpx usando cookies guardadas (sin browser)."""
         dest_dir = self._config.ensure_output_dir()
-        # El período se deja en 'sin-fecha'; pdf_extractor lo corrige al subir a Drive
+        # El período se deja en 'sin-fecha'; integrations.pdf_extractor lo corrige al subir a Drive
         dest_path = unique_path(
             dest_dir / f"metrogas_sin-fecha_{client_number}_factura.pdf"
         )
@@ -105,11 +111,11 @@ class MetrogasProvider:
         """Guarda cookies SAP Fiori + cuentas para la próxima ejecución."""
         from core import session_store
         cookies = {c["name"]: c["value"] for c in await context.cookies()}
-        session_store.save(self.name, {
+        session_store.save(self.session_key, {
             "cookies": cookies,
             "accounts": session_store.accounts_to_list(accounts),
         })
         print("  [Metrogas] Sesión guardada.")
 
 
-register("metrogas", MetrogasProvider)
+register(MetrogasProvider)

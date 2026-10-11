@@ -14,10 +14,16 @@ from .exceptions import (
     LoginError,
     ServerUnavailableError,
 )
+from .credential_cli import manage_credentials
+from .credential_store import (
+    CredentialStore,
+    CredentialStoreError,
+)
 from .provider import Provider
 from .registry import all_provider_names, all_providers, get_provider
 from .utils import dismiss_popups
 from . import run_log
+from integrations.pdf_extractor import determine_invoice_period
 
 
 def parse_args() -> dict:
@@ -31,6 +37,7 @@ def parse_args() -> dict:
         "proveedor": None,
         "todos_proveedores": False,
         "url": None,
+        "gestionar_credenciales": False,
     }
     i = 0
     while i < len(args):
@@ -50,6 +57,8 @@ def parse_args() -> dict:
             i += 1
         elif args[i] == "--todos-proveedores":
             result["todos_proveedores"] = True
+        elif args[i] == "--gestionar-credenciales":
+            result["gestionar_credenciales"] = True
         elif args[i] == "--url" and i + 1 < len(args):
             result["url"] = args[i + 1]
             i += 1
@@ -89,19 +98,21 @@ async def _run_provider_no_browser(
             try:
                 path = await provider.download_invoice(None, None, account)
                 print(f"  OK: {path.resolve()}")
-                period = _determine_period(path, provider.name)
+                period = determine_invoice_period(path, provider.extract_invoice_date)
                 run_log.log_ok(provider.name, account.client_number, period, path)
                 if drive_uploader and drive_root_id:
                     banco = account.extra.get("banco", "") if account.extra else ""
-                    _upload_to_drive(drive_uploader, drive_root_id, provider.name, period, path, banco)
+                    from integrations.drive import upload_invoice_to_drive
+                    upload_invoice_to_drive(
+                        drive_uploader, drive_root_id, provider, period, path, banco
+                    )
                 results.append((account, path, None))
             except Exception as e:
                 print(f"  ERROR: {e}", file=sys.stderr)
                 run_log.log_error(provider.name, account.client_number, str(e))
                 results.append((account, None, e))
-                # Si parece error de auth, invalidar sesión guardada
-                if "401" in str(e) or "403" in str(e) or "token" in str(e).lower():
-                    session_store.clear(provider.name)
+                if provider.is_session_error(e):
+                    session_store.clear(provider.session_key)
                     print(
                         f"  [Session] Sesión invalidada — el próximo run hará login.",
                         file=sys.stderr,
@@ -124,15 +135,18 @@ async def _run_provider_no_browser(
     try:
         pdf_path = await provider.download_invoice(None, None, account)
     except Exception as e:
-        if "401" in str(e) or "403" in str(e) or "token" in str(e).lower():
-            session_store.clear(provider.name)
+        if provider.is_session_error(e):
+            session_store.clear(provider.session_key)
         raise
     print(f"\nFactura descargada: {pdf_path.resolve()}")
-    period = _determine_period(pdf_path, provider.name)
+    period = determine_invoice_period(pdf_path, provider.extract_invoice_date)
     run_log.log_ok(provider.name, account.client_number, period, pdf_path)
     if drive_uploader and drive_root_id:
         banco = account.extra.get("banco", "") if account.extra else ""
-        _upload_to_drive(drive_uploader, drive_root_id, provider.name, period, pdf_path, banco)
+        from integrations.drive import upload_invoice_to_drive
+        upload_invoice_to_drive(
+            drive_uploader, drive_root_id, provider, period, pdf_path, banco
+        )
     return True
 
 
@@ -146,15 +160,25 @@ async def run_provider(
     drive_uploader=None,
     drive_root_id: str = "",
     nosession: bool = False,
+    credential_store: CredentialStore | None = None,
 ) -> bool:
     """Run a single provider. Returns True on full success."""
     from core import session_store
 
     config = provider.get_config()
+    if provider.requires_credentials:
+        credential_store = credential_store or CredentialStore()
+        profile = credential_store.request_credentials(provider.name)
+        provider.configure_credentials(
+            profile,
+            len(credential_store.list_profiles(provider.name)),
+            Path(__file__).resolve().parents[1] / ".sessions",
+        )
+    credential_alias = provider.credential_alias
+    provider_session_key = provider.session_key
     if debug:
         config.headless = False
-    if url and provider.name == "edesur":
-        config.docuprint_url = url
+    provider.apply_run_options(url=url)
 
     print(f"\n{'='*50}")
     print(f"  {provider.display_name}")
@@ -163,8 +187,8 @@ async def run_provider(
     # ─── Intento session-first (sin browser) ─────────────────────────────────
     if nosession:
         print("[Session] Ignorando la sesión guardada; se usará un perfil temporal limpio.")
-    elif not listar and hasattr(provider, "try_resume_session"):
-        saved = session_store.load(provider.name)
+    elif not listar and provider.can_resume_session:
+        saved = session_store.load(provider_session_key)
         if saved:
             print("Sesión guardada encontrada — verificando...")
             try:
@@ -176,16 +200,19 @@ async def run_provider(
                     )
                 else:
                     print("Sesión expirada. Haciendo login con browser...")
-                    session_store.clear(provider.name)
+                    session_store.clear(provider_session_key)
             except Exception as e:
                 print(f"  Error restaurando sesión: {e}. Haciendo login con browser...")
-                session_store.clear(provider.name)
+                session_store.clear(provider_session_key)
 
     # ─── Path con browser (flujo original) ───────────────────────────────────
-    print(f"Iniciando sesion como {config.email} ...")
+    if credential_alias:
+        print(f"Iniciando sesión con el perfil «{credential_alias}»...")
+    else:
+        print(f"Iniciando sesion como {config.email} ...")
 
     async with BrowserSession(
-        config, profile_name=provider.name, fresh_profile=nosession
+        config, profile_name=provider_session_key, fresh_profile=nosession
     ) as session:
       try:
         await provider.login(session.page, session.context)
@@ -204,7 +231,7 @@ async def run_provider(
             raise InvoiceNotFoundError("No se encontraron cuentas asociadas al usuario.")
 
         # Guardar sesión para la próxima ejecución (evita login al browser)
-        if not nosession and hasattr(provider, "save_session"):
+        if not nosession:
             try:
                 await provider.save_session(session.page, session.context, accounts)
             except Exception as _se:
@@ -231,11 +258,14 @@ async def run_provider(
                 path, err = await _download_one(provider, service_page, service_context, account)
                 if path:
                     print(f"  OK: {path.resolve()}")
-                    period = _determine_period(path, provider.name)
+                    period = determine_invoice_period(path, provider.extract_invoice_date)
                     run_log.log_ok(provider.name, account.client_number, period, path)
                     if drive_uploader and drive_root_id:
                         banco = account.extra.get("banco", "") if account.extra else ""
-                        _upload_to_drive(drive_uploader, drive_root_id, provider.name, period, path, banco)
+                        from integrations.drive import upload_invoice_to_drive
+                        upload_invoice_to_drive(
+                            drive_uploader, drive_root_id, provider, period, path, banco
+                        )
                     results.append((account, path, None))
                 else:
                     print(f"  ERROR: {err}", file=sys.stderr)
@@ -259,78 +289,22 @@ async def run_provider(
         print("Descargando ultima factura...")
         pdf_path = await provider.download_invoice(service_page, service_context, account)
         print(f"\nFactura descargada: {pdf_path.resolve()}")
-        period = _determine_period(pdf_path, provider.name)
+        period = determine_invoice_period(pdf_path, provider.extract_invoice_date)
         run_log.log_ok(provider.name, account.client_number, period, pdf_path)
         if drive_uploader and drive_root_id:
             banco = account.extra.get("banco", "") if account.extra else ""
-            _upload_to_drive(drive_uploader, drive_root_id, provider.name, period, pdf_path, banco)
+            from integrations.drive import upload_invoice_to_drive
+            upload_invoice_to_drive(
+                drive_uploader, drive_root_id, provider, period, pdf_path, banco
+            )
         return True
 
       finally:
         # Cerrar sesion antes de que el browser se cierre (evita conflictos en la proxima ejecucion)
         try:
-            logout_fn = getattr(provider, "logout", None)
-            if callable(logout_fn):
-                await logout_fn(session.page, session.context)
+            await provider.logout(session.page, session.context)
         except Exception as e:
             print(f"  [logout] {provider.name}: {e}", file=sys.stderr)
-
-
-def _extract_period(path: Path) -> str:
-    """Extrae el período del nombre del archivo. Devuelve YYYY-MM-DD o YYYY-MM."""
-    import re
-    m = re.search(r"(\d{4}-\d{2}-\d{2})", path.name)
-    if m:
-        return m.group(1)
-    m = re.search(r"(\d{4}-\d{2})", path.name)
-    return m.group(1) if m else "-"
-
-
-def _determine_period(path: Path, provider_name: str) -> str:
-    """
-    Determina el período del documento intentando leer el PDF con pdfplumber.
-
-    - Éxito  → YYYY-MM-DD extraído del contenido del PDF.
-    - Fallo  → período del nombre del archivo + '_pdf_read_error'
-               (señal visible en el nombre del archivo en Drive).
-    """
-    try:
-        from .pdf_extractor import extract_invoice_date
-        date = extract_invoice_date(path, provider_name)
-        if date:
-            return date
-    except Exception:
-        pass
-
-    # Fallback: nombre de archivo + marcador de error
-    period = _extract_period(path)
-    if period == "-":
-        return "sin_fecha_pdf_read_error"
-    return f"{period}_pdf_read_error"
-
-
-def _upload_to_drive(
-    uploader,
-    root_folder_id: str,
-    provider_name: str,
-    period: str,
-    path: Path,
-    banco: str = "",
-) -> None:
-    """Sube el PDF a Drive. Silencia errores para no interrumpir el flujo principal."""
-    try:
-        from .drive_naming import get_drive_target
-        target = get_drive_target(provider_name, period, banco=banco)
-        file_id = uploader.upload_to_path(
-            path, root_folder_id, target.subfolder_parts, target.filename
-        )
-        drive_path = "/".join(target.subfolder_parts + [target.filename])
-        if file_id:
-            print(f"  Drive: {drive_path} ✓")
-        else:
-            print(f"  Drive: {drive_path} (ya existía)")
-    except Exception as e:
-        print(f"  [Drive] Error al subir {path.name}: {e}", file=sys.stderr)
 
 
 async def run(
@@ -342,6 +316,7 @@ async def run(
     todos_proveedores: bool,
     url: str | None = None,
     nosession: bool = False,
+    credential_store: CredentialStore | None = None,
 ) -> None:
     if todos_proveedores:
         providers = all_providers()
@@ -371,7 +346,7 @@ async def run(
     drive_root_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "").strip()
     if drive_root_id and os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip():
         try:
-            from .drive import DriveUploader
+            from integrations.drive import DriveUploader
             drive_uploader = DriveUploader()
             print(f"[Drive] Uploader iniciado. Carpeta raíz: {drive_root_id}")
         except Exception as e:
@@ -390,6 +365,7 @@ async def run(
                 drive_uploader=drive_uploader,
                 drive_root_id=drive_root_id,
                 nosession=nosession,
+                credential_store=credential_store,
             )
             if not ok:
                 all_ok = False
@@ -403,6 +379,9 @@ async def run(
             print(f"\nERROR [{provider.display_name}]: {e}", file=sys.stderr)
             run_log.log_error(provider.name, None, str(e))
             all_ok = False
+        except CredentialStoreError as e:
+            print(f"\nERROR [{provider.display_name}]: {e}", file=sys.stderr)
+            all_ok = False
 
     if not all_ok:
         sys.exit(1)
@@ -410,21 +389,36 @@ async def run(
 
 def main() -> None:
     from dotenv import load_dotenv
+
+    try:
+        credential_store = CredentialStore()
+        imported = credential_store.import_legacy_dotenv_once(
+            Path(__file__).resolve().parents[1] / ".env"
+        )
+    except CredentialStoreError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(2)
+
+    if imported:
+        print(f"[Credenciales] Se importaron {imported} perfil(es) desde .env.")
+
     load_dotenv()
+    args = parse_args()
+    if args.pop("gestionar_credenciales"):
+        manage_credentials(credential_store)
+        return
 
     # Import providers to trigger registration
     import providers  # noqa: F401
-
-    args = parse_args()
 
     try:
         if sys.platform == "win32":
             loop = asyncio.ProactorEventLoop()
             asyncio.set_event_loop(loop)
-            loop.run_until_complete(run(**args))
+            loop.run_until_complete(run(**args, credential_store=credential_store))
             loop.close()
         else:
-            asyncio.run(run(**args))
+            asyncio.run(run(**args, credential_store=credential_store))
     except CaptchaError as e:
         print(f"\nERROR: {e}", file=sys.stderr)
         print("Sugerencia: ejecutar con --debug para resolver el captcha manualmente.", file=sys.stderr)

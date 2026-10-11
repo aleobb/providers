@@ -1,5 +1,7 @@
 from pathlib import Path
-from pydantic import Field
+from typing import Any, ClassVar, Mapping
+
+from pydantic import Field, PrivateAttr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,14 +15,23 @@ _DEFAULT_BROWSER_USER_AGENT = (
 class BaseProviderConfig(BaseSettings):
     """Base config shared by all providers. Subclass and set env_prefix."""
 
+    _credential_values: dict[str, str] = PrivateAttr(default_factory=dict)
+    _credential_names: ClassVar[frozenset[str]] = frozenset(
+        {
+            "email",
+            "password",
+            "documento_nacional_de_identidad",
+            "usuario",
+            "titular",
+        }
+    )
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
 
-    email: str = Field(..., description="Email de la cuenta")
-    password: str = Field(..., description="Contraseña de la cuenta")
     output_dir: Path = Field(Path("./facturas"), description="Directorio de destino")
     headless: bool = Field(True, description="Ejecutar browser en modo headless")
     timeout_ms: int = Field(30000, description="Timeout en ms")
@@ -39,6 +50,30 @@ class BaseProviderConfig(BaseSettings):
         None,
         description="Directorio de datos de Chrome; None usa un perfil aislado",
     )
+
+    def __init__(self, **values: Any) -> None:
+        credentials = {
+            key: str(values.pop(key))
+            for key in self._credential_names
+            if key in values
+        }
+        super().__init__(**values)
+        self._credential_values = credentials
+
+    @property
+    def email(self) -> str:
+        return self._credential_values.get("email", "")
+
+    @property
+    def password(self) -> str:
+        return self._credential_values.get("password", "")
+
+    def set_credentials(self, credentials: Mapping[str, str]) -> None:
+        self._credential_values = {
+            key: value
+            for key, value in credentials.items()
+            if key in self._credential_names
+        }
 
     def ensure_output_dir(self) -> Path:
         self.output_dir.mkdir(parents=True, exist_ok=True)

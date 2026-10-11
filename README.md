@@ -38,6 +38,12 @@ Los módulos implementan el contrato abstracto común `core.provider.Provider`. 
 
 El core coordina el ciclo común y llama a hooks tipados del proveedor para las opciones de ejecución, la configuración de sesión, la restauración/guardado, el cierre de sesión, la extracción de fechas y la nomenclatura de Drive. Cada proveedor declara explícitamente si soporta reanudación y mantiene en su módulo los detalles de su portal; por ejemplo, Edesur interpreta su URL alternativa y obtiene sus enlaces de Gmail, mientras que Visa define su formato de fecha y su archivo de sesión. Las integraciones comunes solo extraen el PDF o suben archivos usando esos hooks; no contienen condicionales por nombre de proveedor.
 
+Los servicios HTTP que descargan varias cuentas reutilizan su `httpx.AsyncClient` durante el ciclo del proveedor; el core libera esos clientes al finalizar la ejecución.
+
+Claro y Telecentro comparten en `core/network_diagnostics.py` el filtrado de dominios, resumen de respuestas y redacción de secretos, manteniendo las diferencias específicas de cada portal.
+
+Visa mantiene sus estrategias de descarga, selector de tarjeta, logout y extracción del período en módulos internos separados; `accounts.py` y `login.py` conservan las tareas correspondientes.
+
 La integracion con Google Drive es opcional; sus variables tambien se documentan en `.env.example`.
 
 ## Uso
@@ -53,4 +59,4 @@ Si un proveedor tiene varios perfiles, el programa solicita cuál usar; si solo 
 
 ## Desarrollo
 
-Las pruebas estan en `tests/` y los utilitarios de diagnostico de Visa en `scripts/`. Estos ultimos interactuan con el portal; no son necesarios para las descargas habituales.
+Las pruebas compartidas estan en `tests/`; las especificas de cada proveedor, en `providers/<proveedor>/tests/`. Los utilitarios de diagnostico manual de Visa tambien estan en `providers/visa/tests/`; interactuan con el portal y no son necesarios para las descargas habituales.

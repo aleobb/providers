@@ -32,6 +32,7 @@ class EdenorProvider(Provider):
         # Credenciales de sesión guardada (path sin browser)
         self._saved_cookies: dict | None = None
         self._saved_token: str | None = None
+        self._invoice_service: InvoiceService | None = None
 
     def get_config(self) -> EdenorConfig:
         return self._config
@@ -61,18 +62,29 @@ class EdenorProvider(Provider):
         page/context pueden ser None cuando se restaura desde sesión guardada:
         en ese caso usa las credenciales en self._saved_cookies / self._saved_token.
         """
-        if page is None:
-            service = InvoiceService(
-                None, None, None, self._config,
-                saved_cookies=self._saved_cookies,
-                saved_token=self._saved_token,
-            )
-        else:
-            service = InvoiceService(context, page, self._interceptor, self._config)
-        return await service.download_latest(
+        if self._invoice_service is None:
+            if page is None:
+                self._invoice_service = InvoiceService(
+                    None,
+                    None,
+                    None,
+                    self._config,
+                    saved_cookies=self._saved_cookies,
+                    saved_token=self._saved_token,
+                )
+            else:
+                self._invoice_service = InvoiceService(
+                    context, page, self._interceptor, self._config
+                )
+        return await self._invoice_service.download_latest(
             account_id=account.extra["id"],
             client_number=account.client_number,
         )
+
+    async def close(self) -> None:
+        if self._invoice_service is not None:
+            await self._invoice_service.aclose()
+            self._invoice_service = None
 
     # ─── Session store ────────────────────────────────────────────────────────
 

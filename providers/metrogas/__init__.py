@@ -33,6 +33,8 @@ class MetrogasProvider(Provider):
     def __init__(self):
         self._config = MetrogasConfig()
         self._saved_cookies: dict | None = None
+        self._invoice_service: InvoiceService | None = None
+        self._no_browser_client: httpx.AsyncClient | None = None
 
     def get_config(self) -> MetrogasConfig:
         return self._config
@@ -54,8 +56,9 @@ class MetrogasProvider(Provider):
         """
         if page is None:
             return await self._download_no_browser(account.client_number)
-        service = InvoiceService(page, self._config)
-        return await service.download_for_client(account.client_number)
+        if self._invoice_service is None:
+            self._invoice_service = InvoiceService(page, self._config)
+        return await self._invoice_service.download_for_client(account.client_number)
 
     async def _download_no_browser(self, client_number: str) -> Path:
         """Descarga directa vía httpx usando cookies guardadas (sin browser)."""
@@ -65,15 +68,24 @@ class MetrogasProvider(Provider):
             dest_dir / f"metrogas_sin-fecha_{client_number}_factura.pdf"
         )
         url = f"https://portal.micuenta.metrogas.com.ar{_INVOICE_API_PATH}{client_number}"
-        async with httpx.AsyncClient(
-            cookies=self._saved_cookies or {},
-            follow_redirects=True,
-            timeout=60,
-            verify=False,
-        ) as client:
-            r = await client.get(url)
-            dest_path.write_bytes(_validated_pdf_content(r, client_number))
+        if self._no_browser_client is None:
+            self._no_browser_client = httpx.AsyncClient(
+                cookies=self._saved_cookies or {},
+                follow_redirects=True,
+                timeout=60,
+                verify=False,
+            )
+        r = await self._no_browser_client.get(url)
+        dest_path.write_bytes(_validated_pdf_content(r, client_number))
         return dest_path
+
+    async def close(self) -> None:
+        if self._invoice_service is not None:
+            await self._invoice_service.aclose()
+            self._invoice_service = None
+        if self._no_browser_client is not None:
+            await self._no_browser_client.aclose()
+            self._no_browser_client = None
 
     # ─── Session store ────────────────────────────────────────────────────────
 

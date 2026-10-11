@@ -109,3 +109,6 @@ class Provider(ABC):
 
     async def logout(self, page: Page, context: BrowserContext) -> None:
         """Close the portal session; providers may override this."""
+
+    async def close(self) -> None:
+        """Release provider-owned resources after a run."""

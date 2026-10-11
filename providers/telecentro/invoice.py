@@ -29,6 +29,10 @@ class InvoiceService:
     def __init__(self, config: TelecentroConfig, base_jwt: str):
         self.config = config
         self.base_jwt = base_jwt
+        self._client = httpx.AsyncClient(verify=False)
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
 
     async def download_for_client(self, account: Account) -> Path:
         client_id = account.client_number
@@ -74,22 +78,23 @@ class InvoiceService:
             "Authorization": f"Bearer {self.base_jwt}",
             "Content-Type": "application/json",
         }
-        async with httpx.AsyncClient(headers=headers, verify=False, timeout=30) as client:
-            r = await client.post(
-                f"{self.config.api_base}/sv/api/refreshtokenByClient",
-                json={"clienteid": int(client_id)},
+        r = await self._client.post(
+            f"{self.config.api_base}/sv/api/refreshtokenByClient",
+            json={"clienteid": int(client_id)},
+            headers=headers,
+            timeout=30,
+        )
+        if r.status_code >= 400:
+            raise DownloadError(
+                f"HTTP {r.status_code} al obtener JWT para cuenta {client_id}: {r.text[:200]}"
             )
-            if r.status_code >= 400:
-                raise DownloadError(
-                    f"HTTP {r.status_code} al obtener JWT para cuenta {client_id}: {r.text[:200]}"
-                )
-            data = r.json()
-            token = data.get("token", "")
-            if not token:
-                raise DownloadError(
-                    f"refreshtokenByClient no devolvió token para cuenta {client_id}"
-                )
-            return token
+        data = r.json()
+        token = data.get("token", "")
+        if not token:
+            raise DownloadError(
+                f"refreshtokenByClient no devolvió token para cuenta {client_id}"
+            )
+        return token
 
     async def _fetch_comprobantes(self, account_jwt: str) -> list:
         """
@@ -103,17 +108,18 @@ class InvoiceService:
             "Authorization": f"Bearer {account_jwt}",
             "Accept": "application/json",
         }
-        async with httpx.AsyncClient(headers=headers, verify=False, timeout=30) as client:
-            r = await client.get(
-                f"{self.config.api_base}/bss/fac/facturacion/v1/comprobantes/cantidad/18",
-                params={"tipoFacturacion": "S"},
+        r = await self._client.get(
+            f"{self.config.api_base}/bss/fac/facturacion/v1/comprobantes/cantidad/18",
+            params={"tipoFacturacion": "S"},
+            headers=headers,
+            timeout=30,
+        )
+        if r.status_code >= 400:
+            raise DownloadError(
+                f"HTTP {r.status_code} al obtener comprobantes: {r.text[:200]}"
             )
-            if r.status_code >= 400:
-                raise DownloadError(
-                    f"HTTP {r.status_code} al obtener comprobantes: {r.text[:200]}"
-                )
-            data = r.json()
-            return data.get("comprobantes", [])
+        data = r.json()
+        return data.get("comprobantes", [])
 
     async def _download_pdf(self, account_jwt: str, key: str, client_id: str) -> bytes:
         """
@@ -125,21 +131,23 @@ class InvoiceService:
             "Authorization": f"Bearer {account_jwt}",
         }
         pdf_url = f"{self.config.invoices_url}/{key}"
-        async with httpx.AsyncClient(
-            headers=headers, verify=False, follow_redirects=True, timeout=60
-        ) as client:
-            r = await client.get(pdf_url)
-            if r.status_code >= 400:
-                raise DownloadError(
-                    f"HTTP {r.status_code} al descargar PDF para cuenta {client_id}"
-                )
-            content_type = r.headers.get("content-type", "")
-            if "pdf" not in content_type.lower() and len(r.content) < 1000:
-                raise DownloadError(
-                    f"La respuesta del PDF no parece un PDF válido "
-                    f"(content-type: {content_type}, size: {len(r.content)})"
-                )
-            return r.content
+        r = await self._client.get(
+            pdf_url,
+            headers=headers,
+            timeout=60,
+            follow_redirects=True,
+        )
+        if r.status_code >= 400:
+            raise DownloadError(
+                f"HTTP {r.status_code} al descargar PDF para cuenta {client_id}"
+            )
+        content_type = r.headers.get("content-type", "")
+        if "pdf" not in content_type.lower() and len(r.content) < 1000:
+            raise DownloadError(
+                f"La respuesta del PDF no parece un PDF válido "
+                f"(content-type: {content_type}, size: {len(r.content)})"
+            )
+        return r.content
 
 
 def _parse_period(fecha: str) -> str:

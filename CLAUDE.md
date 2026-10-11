@@ -9,7 +9,8 @@ Script Python para loguearse en portales web de proveedores de servicios (con us
 ```
 <raiz-del-proyecto>\
 ├── main.py                          # Entry point -> core.cli.main()
-├── scripts/                         # Herramientas de diagnóstico de Visa
+├── providers/<proveedor>/tests/     # Pruebas específicas de cada proveedor
+├── providers/visa/tests/            # Pruebas y herramientas de diagnóstico Visa
 ├── .env                             # Configuracion no secreta
 ├── .credentials/                    # SQLite con perfiles cifrados (gitignoreado)
 ├── requirements.txt                 # playwright, python-dotenv, httpx, pydantic-settings, tenacity
@@ -59,6 +60,12 @@ Script Python para loguearse en portales web de proveedores de servicios (con us
 - **System Chrome** (`channel="chrome"`) en vez de Chromium bundled — evita error de VC++ redistributable en Windows
 - **Windows ProactorEventLoop**: requerido para subprocesos de Playwright en Windows (SelectorEventLoop no los soporta)
 - **Archivos PDF** se guardan en `./facturas/` con nombre: `{proveedor}_{periodo}_{cliente}_factura.pdf`
+
+### Convenciones de Desarrollo y Estado Local
+- Las pruebas compartidas viven en `tests/`; las específicas de un proveedor, incluidas las de integración que caracterizan su comportamiento, viven en `providers/<proveedor>/tests/`.
+- Como las carpetas de pruebas de proveedores no son paquetes Python, los módulos de test deben tener nombres únicos en todo el árbol para evitar colisiones de importación durante la recolección de pytest.
+- Los utilitarios manuales de Visa (`visa_debug_session.py` y `visa_test_switch.py`) viven junto a sus pruebas en `providers/visa/tests/`; no son pruebas que pytest deba ejecutar.
+- `.sessions/` y `.chrome_profile/` contienen credenciales de sesión, tokens, cookies o estado persistente del navegador: no borrarlos como limpieza de caché. `.pytest_cache/` y `.tmp/` son regenerables y están ignorados por Git.
 
 ## Proveedores
 

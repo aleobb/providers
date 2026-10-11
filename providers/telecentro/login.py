@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import parse_qsl
 
 from playwright.async_api import (
     Error as PlaywrightError,
@@ -14,6 +13,7 @@ from playwright.async_api import (
 )
 
 from core.exceptions import LoginError, NavigationError
+from core.network_diagnostics import NetworkDiagnostics
 from .config import TelecentroConfig
 
 
@@ -23,6 +23,10 @@ class LoginOrchestrator:
     def __init__(self, page: Page, config: TelecentroConfig):
         self.page = page
         self.config = config
+        self._network_diagnostics = NetworkDiagnostics(
+            ("apiext.telecentro.net.ar",),
+            preserve_netloc=True,
+        )
         self._jwt = ""
         self._login_submitted = False
         self._requests: list[str] = []
@@ -396,50 +400,20 @@ class LoginOrchestrator:
         )
 
     def _is_auth_request(self, url: str) -> bool:
-        parsed_url = urlsplit(url)
-        return parsed_url.hostname == "apiext.telecentro.net.ar"
+        return self._network_diagnostics.matches_domain(url)
 
     def _safe_url(self, url: str) -> str:
-        parsed_url = urlsplit(url)
-        return f"{parsed_url.netloc}{parsed_url.path}"
+        return self._network_diagnostics.safe_url(url)
 
     def _summarize_body(self, body: str, content_type: str) -> str:
-        if not body:
-            return "body=(empty)"
-        if "json" in content_type.lower():
-            try:
-                payload = json.loads(body)
-            except json.JSONDecodeError:
-                pass
-            else:
-                if isinstance(payload, dict):
-                    keys = ",".join(str(key) for key in list(payload)[:15])
-                    safe_values = []
-                    for key in (
-                        "error",
-                        "message",
-                        "mensaje",
-                        "code",
-                        "codigo",
-                        "estado",
-                    ):
-                        value = payload.get(key)
-                        if isinstance(value, (str, int, float, bool)):
-                            safe_values.append(f"{key}={self._redact(str(value)[:120])}")
-                    details = f"json-keys={keys or '(none)'}"
-                    if safe_values:
-                        details += f"; json-details={','.join(safe_values)}"
-                    return details
-        text = " ".join(body.split())
-        return f"body-text={self._redact(text[:180])}"
+        return self._network_diagnostics.summarize_body(
+            body,
+            content_type,
+            ("error", "message", "mensaje", "code", "codigo", "estado"),
+            (self.config.email, self.config.password, self._jwt),
+        )
 
     def _redact(self, value: str) -> str:
-        for secret in (self.config.email, self.config.password, self._jwt):
-            if secret:
-                value = value.replace(secret, "[redacted]")
-        value = re.sub(
-            r"eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9_-]*)?",
-            "[redacted-jwt]",
-            value,
+        return self._network_diagnostics.redact(
+            value, (self.config.email, self.config.password, self._jwt)
         )
-        return value

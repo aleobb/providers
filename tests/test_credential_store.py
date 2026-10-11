@@ -12,10 +12,6 @@ from core.credential_store import (
 )
 from core.provider import Provider
 from core.registry import all_providers
-from providers.edenor.config import EdenorConfig
-from providers.edesur import EdesurProvider
-from providers.visa.config import VisaConfig
-from providers.visa import VisaProvider
 
 
 @pytest.fixture
@@ -124,40 +120,6 @@ def test_registered_providers_share_the_abstract_contract():
     assert all(isinstance(provider, Provider) for provider in providers)
 
 
-def test_edesur_applies_its_provider_specific_url_option():
-    provider = EdesurProvider()
-    url = "https://example.com/invoice"
-
-    provider.apply_run_options(url=url)
-
-    assert provider.get_config().docuprint_url == url
-
-
-def test_visa_configures_a_session_file_for_each_credential_profile(tmp_path):
-    provider = VisaProvider()
-    profile = CredentialProfile(
-        id=12,
-        provider="visa",
-        alias="Personal",
-        session_version="abc123",
-        credentials={
-            "documento_nacional_de_identidad": "12345678",
-            "usuario": "visa-user",
-            "password": "secret",
-        },
-    )
-    sessions_directory = tmp_path / "sessions"
-
-    provider.configure_credentials(profile, 1, sessions_directory)
-
-    assert provider.session_key == "visa-12-abc123"
-    assert provider.get_config().session_file == (
-        sessions_directory / "visa-12-abc123_session.json"
-    )
-    assert provider.get_config().email == ""
-    assert provider.get_config().password == "secret"
-
-
 def test_legacy_credential_profiles_are_migrated_to_clients(
     credential_store,
 ):
@@ -263,41 +225,6 @@ def test_legacy_dotenv_is_imported_once_and_secret_lines_are_removed(
     assert "should-not-import-again" in env_file.read_text(encoding="utf-8")
 
 
-def test_credential_values_are_not_loaded_from_environment(monkeypatch):
-    monkeypatch.setenv("EDENOR_EMAIL", "plaintext@example.com")
-    monkeypatch.setenv("EDENOR_PASSWORD", "plaintext-secret")
-    config = EdenorConfig()
-
-    assert config.email == ""
-    assert config.password == ""
-
-
-def test_credentials_are_injected_and_visa_fields_remain_available():
-    config = EdenorConfig(email="user@example.com", password="secret")
-    assert config.email == "user@example.com"
-    assert config.password == "secret"
-
-    visa_config = VisaConfig(
-        documento_nacional_de_identidad="12345678",
-        usuario="visa-user",
-        password="visa-secret",
-        titular="Titular",
-    )
-    assert visa_config.documento_nacional_de_identidad == "12345678"
-    assert visa_config.usuario == "visa-user"
-    assert visa_config.password == "visa-secret"
-    assert visa_config.titular == "Titular"
-
-
-def test_profile_validation_reports_missing_login_fields(credential_store):
-    credential_store.add_profile(
-        "visa", "Incompleto", {"usuario": "visa-user"}
-    )
-
-    with pytest.raises(CredentialStoreError, match="DNI, Contraseña"):
-        credential_store.request_credentials("visa")
-
-
 def test_generic_credential_request_returns_valid_profile(credential_store):
     profile_id = credential_store.add_profile(
         "edenor", "Casa", {"email": "home@example.com", "password": "secret"}
@@ -307,40 +234,6 @@ def test_generic_credential_request_returns_valid_profile(credential_store):
 
     assert profile.id == profile_id
     assert profile.credentials["password"] == "secret"
-
-
-def test_editing_incomplete_visa_profile_requires_missing_credentials(
-    credential_store, monkeypatch
-):
-    monkeypatch.setattr("builtins.input", lambda _prompt: "")
-
-    with pytest.raises(CredentialStoreError, match="DNI es obligatorio"):
-        _prompt_credentials(
-            credential_store.get_credential_fields("visa"),
-            {"titular": "Titular"},
-            editing=True,
-        )
-
-
-def test_editing_incomplete_visa_profile_collects_required_fields(
-    credential_store, monkeypatch
-):
-    answers = iter(["12345678", "visa-user", "Titular"])
-    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
-    monkeypatch.setattr("core.credential_cli.getpass", lambda _prompt: "visa-secret")
-
-    credentials = _prompt_credentials(
-        credential_store.get_credential_fields("visa"),
-        {"titular": "Titular"},
-        editing=True,
-    )
-
-    assert credentials == {
-        "documento_nacional_de_identidad": "12345678",
-        "usuario": "visa-user",
-        "password": "visa-secret",
-        "titular": "Titular",
-    }
 
 
 def test_duplicate_alias_is_rejected(credential_store):

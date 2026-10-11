@@ -33,10 +33,40 @@ async def download_invoice(
       2. Tomar summaries[0].statementDate (el mas reciente)
       3. POST /v2/creditCard/monthlySummaryPdf {cardNumberM, statementDate} -> blob PDF
     """
-    card_number = account.client_number
-    period = await _get_latest_period(config, token, cookies, card_number)
-    pdf_bytes = await _fetch_pdf(config, token, cookies, card_number, period)
+    async with httpx.AsyncClient(
+        timeout=60, follow_redirects=True, cookies=cookies
+    ) as client:
+        return await _download_for_account(client, config, token, account)
 
+
+class InvoiceService:
+    def __init__(
+        self, config: MastercardConfig, token: str, cookies: dict[str, str]
+    ):
+        self.config = config
+        self.token = token
+        self._client = httpx.AsyncClient(
+            timeout=60, follow_redirects=True, cookies=cookies
+        )
+
+    async def download_for_account(self, account: Account) -> Path:
+        return await _download_for_account(
+            self._client, self.config, self.token, account
+        )
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
+
+async def _download_for_account(
+    client: httpx.AsyncClient,
+    config: MastercardConfig,
+    token: str,
+    account: Account,
+) -> Path:
+    card_number = account.client_number
+    period = await _get_latest_period(client, config, token, card_number)
+    pdf_bytes = await _fetch_pdf(client, config, token, card_number, period)
     last4 = card_number[-4:] if len(card_number) >= 4 else card_number
     dest = unique_path(
         config.ensure_output_dir() / f"mastercard_{period}_{last4}_resumen.pdf"
@@ -46,16 +76,18 @@ async def download_invoice(
 
 
 async def _get_latest_period(
-    config: MastercardConfig, token: str, cookies: dict[str, str], card_number: str
+    client: httpx.AsyncClient,
+    config: MastercardConfig,
+    token: str,
+    card_number: str,
 ) -> str:
     """Obtiene la fecha del resumen mas reciente."""
     url = f"{config.api_base}/v2/creditCard/latestSummaryStatus"
     payload = {"cardNumberM": card_number}
 
-    async with httpx.AsyncClient(
-        timeout=30, follow_redirects=True, cookies=cookies
-    ) as client:
-        r = await client.post(url, json=payload, headers=_api_headers(token))
+    r = await client.post(
+        url, json=payload, headers=_api_headers(token), timeout=30
+    )
 
     if r.status_code in (500, 503):
         raise ServerUnavailableError(
@@ -85,9 +117,9 @@ async def _get_latest_period(
 
 
 async def _fetch_pdf(
+    client: httpx.AsyncClient,
     config: MastercardConfig,
     token: str,
-    cookies: dict[str, str],
     card_number: str,
     period: str,
 ) -> bytes:
@@ -97,10 +129,7 @@ async def _fetch_pdf(
     headers = _api_headers(token)
     headers["Accept"] = "application/pdf, */*"
 
-    async with httpx.AsyncClient(
-        timeout=60, follow_redirects=True, cookies=cookies
-    ) as client:
-        r = await client.post(url, json=payload, headers=headers)
+    r = await client.post(url, json=payload, headers=headers, timeout=60)
 
     if r.status_code in (500, 503):
         raise ServerUnavailableError(

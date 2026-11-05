@@ -24,6 +24,12 @@ from .provider import Provider
 from .registry import all_provider_names, all_providers, get_provider
 from .utils import dismiss_popups
 from . import run_log
+from integrations.airtable.sync import (
+    AirtableConfigurationError,
+    AirtableConfig,
+    AirtableInvoiceSync,
+    AirtableSyncError,
+)
 from integrations.pdf_extractor.extractor import determine_invoice_period
 from integrations.pdf_extractor.csv_export import (
     invoice_data_to_csv_row,
@@ -46,6 +52,7 @@ def parse_args() -> dict:
         "gestionar_credenciales": False,
         "datos_pdf_csv": None,
         "ingresar": False,
+        "airtable": False,
     }
     i = 0
     while i < len(args):
@@ -67,6 +74,8 @@ def parse_args() -> dict:
             result["todos_proveedores"] = True
         elif args[i] == "--ingresar":
             result["ingresar"] = True
+        elif args[i] == "--airtable":
+            result["airtable"] = True
         elif args[i] == "--gestionar-credenciales":
             result["gestionar_credenciales"] = True
         elif args[i] == "--datos-pdf-csv" and i + 1 < len(args):
@@ -110,13 +119,14 @@ def _upload_if_enabled(
     )
 
 
-def _record_download_success(
+async def _record_download_success(
     provider: Provider,
     account,
     path: Path,
     drive_uploader,
     drive_root_id: str,
     invoice_data_rows: list[dict[str, str]] | None = None,
+    airtable_sync: AirtableInvoiceSync | None = None,
 ) -> None:
     period = determine_invoice_period(path, provider.extract_invoice_date)
     run_log.log_ok(provider.name, account.client_number, period, path)
@@ -164,6 +174,19 @@ def _record_download_success(
     _upload_if_enabled(
         provider, account, period, path, drive_uploader, drive_root_id
     )
+    if airtable_sync is not None:
+        result = await asyncio.to_thread(
+            airtable_sync.sync_invoice, path, invoice_data
+        )
+        action = "creado" if result.created else "actualizado"
+        print(
+            f"  [Airtable] Comprobante {action}: "
+            f"{result.record_id}"
+        )
+        if result.attachment_uploaded:
+            print("  [Airtable] PDF adjuntado en el campo Doc.")
+        else:
+            print("  [Airtable] PDF ya adjunto; se omitió duplicarlo.")
 
 
 async def _download_all_accounts(
@@ -176,6 +199,7 @@ async def _download_all_accounts(
     *,
     without_browser: bool,
     invoice_data_rows: list[dict[str, str]] | None = None,
+    airtable_sync: AirtableInvoiceSync | None = None,
 ) -> bool:
     results = []
     for index, account in enumerate(accounts, 1):
@@ -189,19 +213,17 @@ async def _download_all_accounts(
         )
         if path:
             print(f"  OK: {path.resolve()}")
-            if without_browser:
-                try:
-                    _record_download_success(
-                        provider, account, path, drive_uploader, drive_root_id,
-                        invoice_data_rows,
-                    )
-                except Exception as record_error:
-                    path, error = None, record_error
-            else:
-                _record_download_success(
+            try:
+                await _record_download_success(
                     provider, account, path, drive_uploader, drive_root_id,
-                    invoice_data_rows,
+                    invoice_data_rows, airtable_sync,
                 )
+            except Exception as record_error:
+                if not without_browser and not isinstance(
+                    record_error, AirtableSyncError
+                ):
+                    raise
+                path, error = None, record_error
 
         if error:
             print(f"  ERROR: {error}", file=sys.stderr)
@@ -236,6 +258,7 @@ async def _run_provider_no_browser(
     drive_uploader,
     drive_root_id: str,
     invoice_data_rows: list[dict[str, str]] | None = None,
+    airtable_sync: AirtableInvoiceSync | None = None,
 ) -> bool:
     """
     Descarga facturas usando sesión guardada — sin abrir el browser.
@@ -254,6 +277,7 @@ async def _run_provider_no_browser(
             drive_root_id,
             without_browser=True,
             invoice_data_rows=invoice_data_rows,
+            airtable_sync=airtable_sync,
         )
 
     account = select_account(accounts, cuenta)
@@ -268,9 +292,9 @@ async def _run_provider_no_browser(
             session_store.clear(provider.session_key)
         raise
     print(f"\nFactura descargada: {pdf_path.resolve()}")
-    _record_download_success(
+    await _record_download_success(
         provider, account, pdf_path, drive_uploader, drive_root_id,
-        invoice_data_rows,
+        invoice_data_rows, airtable_sync,
     )
     return True
 
@@ -287,6 +311,7 @@ async def _run_provider(
     nosession: bool = False,
     credential_store: CredentialStore | None = None,
     invoice_data_rows: list[dict[str, str]] | None = None,
+    airtable_sync: AirtableInvoiceSync | None = None,
 ) -> bool:
     """Run a single provider. Returns True on full success."""
     from core import session_store
@@ -323,7 +348,7 @@ async def _run_provider(
                     run_log.log_run_start([provider.name])
                     return await _run_provider_no_browser(
                         provider, accounts, todas, cuenta, drive_uploader,
-                        drive_root_id, invoice_data_rows,
+                        drive_root_id, invoice_data_rows, airtable_sync,
                     )
                 else:
                     print("Sesión expirada. Haciendo login con browser...")
@@ -387,6 +412,7 @@ async def _run_provider(
                 drive_root_id,
                 without_browser=False,
                 invoice_data_rows=invoice_data_rows,
+                airtable_sync=airtable_sync,
             )
 
         # Single account
@@ -397,9 +423,9 @@ async def _run_provider(
         print("Descargando ultima factura...")
         pdf_path = await provider.download_invoice(service_page, service_context, account)
         print(f"\nFactura descargada: {pdf_path.resolve()}")
-        _record_download_success(
+        await _record_download_success(
             provider, account, pdf_path, drive_uploader, drive_root_id,
-            invoice_data_rows,
+            invoice_data_rows, airtable_sync,
         )
         return True
 
@@ -423,6 +449,7 @@ async def run_provider(
     nosession: bool = False,
     credential_store: CredentialStore | None = None,
     invoice_data_rows: list[dict[str, str]] | None = None,
+    airtable_sync: AirtableInvoiceSync | None = None,
 ) -> bool:
     """Run a single provider and release its resources."""
     try:
@@ -438,6 +465,7 @@ async def run_provider(
             nosession=nosession,
             credential_store=credential_store,
             invoice_data_rows=invoice_data_rows,
+            airtable_sync=airtable_sync,
         )
     finally:
         await provider.close()
@@ -509,6 +537,7 @@ async def run(
     credential_store: CredentialStore | None = None,
     datos_pdf_csv: str | None = None,
     ingresar: bool = False,
+    airtable: bool = False,
 ) -> None:
     if ingresar and (
         todos_proveedores
@@ -517,12 +546,17 @@ async def run(
         or todas
         or cuenta is not None
         or datos_pdf_csv is not None
+        or airtable
     ):
         print(
             "--ingresar requiere un único --proveedor y no se combina con "
-            "--listar, --todas, --cuenta ni --datos-pdf-csv.",
+            "--listar, --todas, --cuenta, --datos-pdf-csv ni --airtable.",
             file=sys.stderr,
         )
+        sys.exit(2)
+
+    if airtable and listar:
+        print("--airtable solo se puede usar al descargar comprobantes.", file=sys.stderr)
         sys.exit(2)
 
     if todos_proveedores:
@@ -564,6 +598,15 @@ async def run(
             sys.exit(1)
         return
 
+    airtable_sync = None
+    if airtable:
+        try:
+            airtable_sync = AirtableInvoiceSync(AirtableConfig.from_env())
+        except AirtableConfigurationError as error:
+            print(f"ERROR [Airtable]: {error}", file=sys.stderr)
+            sys.exit(2)
+        print("[Airtable] Sincronización de comprobantes activada.")
+
     if debug:
         print("[DEBUG] Modo headless desactivado - el browser sera visible.")
 
@@ -596,6 +639,7 @@ async def run(
                 nosession=nosession,
                 credential_store=credential_store,
                 invoice_data_rows=invoice_data_rows,
+                airtable_sync=airtable_sync,
             )
             if not ok:
                 all_ok = False
@@ -611,6 +655,10 @@ async def run(
             all_ok = False
         except CredentialStoreError as e:
             print(f"\nERROR [{provider.display_name}]: {e}", file=sys.stderr)
+            all_ok = False
+        except AirtableSyncError as e:
+            print(f"\nERROR [Airtable] [{provider.display_name}]: {e}", file=sys.stderr)
+            run_log.log_error(provider.name, None, str(e))
             all_ok = False
 
     if datos_pdf_csv and invoice_data_rows is not None:

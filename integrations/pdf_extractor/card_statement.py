@@ -44,7 +44,7 @@ _VISA_CURRENT_CLOSE = re.compile(
     rf"CIERRE\s+ACTUAL:\s*({_DATE_WORD})", re.IGNORECASE
 )
 _VISA_CURRENT_DUE_AND_BALANCES = re.compile(
-    rf"^({_DATE_WORD})\s+([\d.,]+)\s+([\d.,]+)\s+[\d.,]+"
+    rf"^({_DATE_WORD})\s+([\d.,]+)\s+([\d.,]+-?)\s+[\d.,]+"
     r"(?:\s+(-,--|[\d.,]+))?",
     re.IGNORECASE | re.MULTILINE,
 )
@@ -64,7 +64,7 @@ _VISA_FLEX_CURRENT_CLOSE = re.compile(
     rf"CIERRE\s+ACTUAL:\s*({_FLEX_DATE_WORD})", re.IGNORECASE
 )
 _VISA_FLEX_CURRENT_DUE_AND_BALANCES = re.compile(
-    rf"^\s*.*?\b({_FLEX_DATE_WORD})\s*([\d.,]+)\s+([\d.,]+)-?\s+[\d.,]+"
+    rf"^\s*.*?\b({_FLEX_DATE_WORD})\s*([\d.,]+)\s+([\d.,]+-?)\s+[\d.,]+"
     r"(?:\s+(-,--|[\d.,]+))?",
     re.IGNORECASE | re.MULTILINE,
 )

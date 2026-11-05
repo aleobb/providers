@@ -10,6 +10,7 @@ Uso:
     python main.py --proveedor <nombre> --debug
     python main.py --proveedor <nombre> --ingresar
     python main.py --proveedor <nombre> --todas --datos-pdf-csv datos.csv
+    python main.py --proveedor <nombre> --todas --airtable
 
 Procesar PDFs existentes:
     python -m integrations.pdf_extractor.cli --dir facturas --csv datos.csv

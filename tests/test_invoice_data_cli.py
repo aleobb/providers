@@ -1,3 +1,4 @@
+import asyncio
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -42,14 +43,26 @@ def test_success_report_includes_extracted_invoice_data(monkeypatch, tmp_path, c
     )
     path = tmp_path / "invoice.pdf"
     invoice_data_rows = []
+    airtable_calls = []
+    airtable_sync = SimpleNamespace(
+        sync_invoice=lambda *args: (
+            airtable_calls.append(args)
+            or SimpleNamespace(
+                record_id="rec-123", created=True, attachment_uploaded=True
+            )
+        )
+    )
 
-    cli._record_download_success(
-        provider,
-        account,
-        path,
-        drive_uploader=None,
-        drive_root_id="",
-        invoice_data_rows=invoice_data_rows,
+    asyncio.run(
+        cli._record_download_success(
+            provider,
+            account,
+            path,
+            drive_uploader=None,
+            drive_root_id="",
+            invoice_data_rows=invoice_data_rows,
+            airtable_sync=airtable_sync,
+        )
     )
 
     output = capsys.readouterr().out
@@ -65,3 +78,7 @@ def test_success_report_includes_extracted_invoice_data(monkeypatch, tmp_path, c
     assert invoice_data_rows[0]["importe"] == "1234.56"
     assert invoice_data_rows[0]["cierre_actual"] == "2026-10-18"
     assert extract_calls[0][1]["bank_name"] == "Banco de la cuenta"
+    assert airtable_calls[0][0] == path
+    assert airtable_calls[0][1].amount == Decimal("1234.56")
+    assert "[Airtable] Comprobante creado: rec-123" in output
+    assert "[Airtable] PDF adjuntado en el campo Doc." in output

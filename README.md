@@ -67,6 +67,36 @@ python -m integrations.pdf_extractor.cli --dir facturas\edenor --proveedor edeno
 
 La integracion con Google Drive es opcional; sus variables tambien se documentan en `.env.example`.
 
+### Airtable
+
+La sincronización con Airtable es opcional y explícita. Configurá
+`AIRTABLE_TOKEN` y `AIRTABLE_BASE_ID` en el entorno o en `.env`; por defecto
+usa las tablas `Comprobantes` y `Conceptos`. Para enviar los datos extraídos
+de cada PDF descargado:
+
+```powershell
+python main.py --proveedor edenor --todas --airtable
+```
+
+En la estructura actual, `Comprobantes` enlaza a `Conceptos` mediante el campo
+`Concepto`. El extractor busca el registro de `Conceptos` cuyo campo `Nombre`
+contenga los términos del proveedor y del banco detectado; requiere una única
+coincidencia y no crea conceptos automáticamente. Los valores comunes se
+guardan en `Fecha Vto.` y `Importe Pesos`; las fechas de tarjeta se guardan en
+`Prox.Vto.`, `Cierre Actual` y `Prox.Cierre`, y el saldo en dólares en
+`Importe USD`.
+
+El upsert identifica un comprobante por concepto enlazado y vencimiento
+actual. Si hay una sola coincidencia, actualiza; si no hay ninguna, crea; si
+hay más de una, se detiene sin modificar registros. Por eso se requiere que
+el vencimiento actual esté extraído. Los campos ausentes no sobrescriben los
+datos existentes. Los nombres de tablas y campos se pueden ajustar mediante
+las variables `AIRTABLE_*` de `.env.example`. El PDF se carga directamente
+desde el archivo local al campo de adjuntos `Doc.` con la API de carga de
+Airtable; no hace falta publicar el archivo en una URL externa. Al actualizar,
+si el registro ya tiene cualquier adjunto, se omite la carga para no
+reemplazar ni duplicar el documento existente.
+
 ## Uso
 
 ```powershell

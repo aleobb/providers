@@ -171,6 +171,25 @@ def test_extracts_visa_statement_with_spaced_pdf_text():
     assert data.bank_name is None
 
 
+def test_extracts_negative_usd_amount_from_visa_bbva_statement():
+    text = (
+        "VISA BBVA\n"
+        "CIERRE ACTUAL: 18 Oct 26\n"
+        "VENCIMIENTO SALDO $ SALDO U$S PAGO MIN.$ PAGO MIN.U$S\n"
+        "CAPITAL 18 Oct 26 123.456,78 0.03- 12.345,00 -,--\n"
+        "VTO. ANTERIOR 10 Sep 26 SALDO ANTERIOR $ 100,00 "
+        "PROXIMO CIERRE 29 Nov 26\n"
+        "CIERRE ANTERIOR 28 Ago 26 PAGO MIN. ANT. $ 10,00 "
+        "PROXIMO VTO. 10 Dic 26"
+    )
+    provider = _provider()
+    provider.extract_card_statement_data = parse_visa_statement
+
+    data = invoice_data.extract_invoice_data_from_text(text, provider)
+
+    assert data.amount_usd == Decimal("-0.03")
+
+
 def test_account_bank_overrides_layout_bank():
     text = (
         "VISA\n"

@@ -9,10 +9,17 @@ from core import cli
 def test_download_run_exports_extracted_data_to_csv(monkeypatch, tmp_path):
     csv_path = tmp_path / "download-data.csv"
     provider = SimpleNamespace(name="edenor", display_name="Edenor")
+    airtable_instance = object()
+    received_airtable = []
     monkeypatch.setattr(cli, "get_provider", lambda _name: provider)
     monkeypatch.setattr(cli.run_log, "log_run_start", lambda *_args: None)
+    monkeypatch.setattr(cli.AirtableConfig, "from_env", lambda: object())
+    monkeypatch.setattr(
+        cli, "AirtableInvoiceSync", lambda _config: airtable_instance
+    )
 
     async def fake_run_provider(*_args, invoice_data_rows=None, **_kwargs):
+        received_airtable.append(_kwargs["airtable_sync"])
         invoice_data_rows.append(
             {
                 "archivo": "factura.pdf",
@@ -43,6 +50,7 @@ def test_download_run_exports_extracted_data_to_csv(monkeypatch, tmp_path):
             todos_proveedores=False,
             credential_store=object(),
             datos_pdf_csv=str(csv_path),
+            airtable=True,
         )
     )
 
@@ -50,6 +58,7 @@ def test_download_run_exports_extracted_data_to_csv(monkeypatch, tmp_path):
         rows = list(csv.DictReader(file))
     assert rows[0]["archivo"] == "factura.pdf"
     assert rows[0]["vencimiento_actual"] == "2026-11-05"
+    assert received_airtable == [airtable_instance]
 
 
 def test_parse_args_accepts_download_data_csv(monkeypatch):
@@ -75,3 +84,15 @@ def test_parse_args_accepts_ingresar(monkeypatch):
 
     assert args["proveedor"] == "edenor"
     assert args["ingresar"] is True
+
+
+def test_parse_args_accepts_airtable(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["main.py", "--proveedor", "edenor", "--todas", "--airtable"],
+    )
+
+    args = cli.parse_args()
+
+    assert args["airtable"] is True

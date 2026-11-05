@@ -8,9 +8,15 @@ Uso:
     python main.py --todos-proveedores --todas
     python main.py --proveedor <nombre> --cuenta <numero>
     python main.py --proveedor <nombre> --debug
+    python main.py --proveedor <nombre> --ingresar
+    python main.py --proveedor <nombre> --todas --datos-pdf-csv datos.csv
+
+Procesar PDFs existentes:
+    python -m integrations.pdf_extractor.cli --dir facturas --csv datos.csv
 
 Credenciales de acceso:
     Gestionadas en SQLite; ejecutar --gestionar-credenciales para administrarlas.
+    El gestor permite visualizar los perfiles guardados y sus credenciales.
     La clave de cifrado se configura como PROVIDERS_CREDENTIALS_KEY.
 
 Variables opcionales por proveedor:

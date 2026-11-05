@@ -12,7 +12,7 @@ from googleapiclient.http import MediaIoBaseUpload
 
 from core.provider import Provider
 
-from .drive_naming import get_drive_target
+from .naming import get_drive_target
 
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 

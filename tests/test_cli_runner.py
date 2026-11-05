@@ -19,6 +19,7 @@ class _BaseFakeProvider(Provider):
         self.tmp_path = tmp_path
         self.download_calls = []
         self.saved = False
+        self.logged_in = False
         self.logged_out = False
         self.closed = False
 
@@ -30,7 +31,7 @@ class _BaseFakeProvider(Provider):
         )
 
     async def login(self, _page, _context):
-        pass
+        self.logged_in = True
 
     async def fetch_accounts(self, _page, _context):
         return self.accounts
@@ -160,9 +161,116 @@ def test_run_provider_lists_accounts_without_downloading(monkeypatch, tmp_path, 
     assert "Casa" in output
     assert "Oficina" in output
     assert provider.download_calls == []
+    assert provider.logged_in is True
     assert provider.saved is True
     assert provider.logged_out is True
     assert provider.closed is True
+
+
+def test_login_provider_keeps_browser_open_until_user_closes_it(
+    monkeypatch, tmp_path, capsys
+):
+    provider = _BaseFakeProvider([Account("123", "Casa", "")], tmp_path)
+    page = SimpleNamespace()
+    waited_events = []
+
+    async def wait_for_event(name):
+        waited_events.append(name)
+
+    page.wait_for_event = wait_for_event
+    context = object()
+    session_options = {}
+
+    class FakeBrowserSession:
+        def __init__(self, config, **options):
+            session_options["config"] = config
+            session_options.update(options)
+
+        async def __aenter__(self):
+            return SimpleNamespace(page=page, context=context)
+
+        async def __aexit__(self, *_args):
+            session_options["browser_closed"] = True
+
+    async def no_sleep(_seconds):
+        pass
+
+    async def no_popups(_page, *, label):
+        return False
+
+    monkeypatch.setattr(cli, "BrowserSession", FakeBrowserSession)
+    monkeypatch.setattr(cli, "dismiss_popups", no_popups)
+    monkeypatch.setattr(cli.asyncio, "sleep", no_sleep)
+
+    result = asyncio.run(cli.login_provider(provider))
+
+    assert result is True
+    assert session_options["config"].headless is False
+    assert session_options["profile_name"] == provider.session_key
+    assert waited_events == ["close"]
+    assert provider.logged_in is True
+    assert provider.saved is False
+    assert provider.logged_out is False
+    assert provider.download_calls == []
+    assert session_options["browser_closed"] is True
+    assert provider.closed is True
+    assert "El portal quedará abierto" in capsys.readouterr().out
+
+
+def test_ingresar_requires_one_explicit_provider(capsys):
+    try:
+        asyncio.run(
+            cli.run(
+                debug=False,
+                listar=False,
+                todas=False,
+                cuenta=None,
+                proveedor=None,
+                todos_proveedores=False,
+                ingresar=True,
+            )
+        )
+    except SystemExit as error:
+        assert error.code == 2
+    else:
+        raise AssertionError("ingresar must require a provider")
+    assert "--proveedor" in capsys.readouterr().err
+
+
+def test_run_ingresar_dispatches_to_login_without_downloading(monkeypatch):
+    provider = SimpleNamespace(name="edenor", display_name="Edenor")
+    login_calls = []
+
+    async def fake_login(selected_provider, *, url, credential_store):
+        login_calls.append((selected_provider, url, credential_store))
+        return True
+
+    monkeypatch.setattr(cli, "get_provider", lambda _name: provider)
+    monkeypatch.setattr(cli, "login_provider", fake_login)
+    monkeypatch.setattr(
+        cli,
+        "run_provider",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("normal download flow must not run")
+        ),
+    )
+    credential_store = object()
+
+    asyncio.run(
+        cli.run(
+            debug=False,
+            listar=False,
+            todas=False,
+            cuenta=None,
+            proveedor="edenor",
+            todos_proveedores=False,
+            url=None,
+            credential_store=credential_store,
+            ingresar=True,
+        )
+    )
+
+    assert login_calls == [(provider, None, credential_store)]
 
 
 def test_run_provider_downloads_all_accounts_and_reports_partial_failure(
@@ -234,9 +342,11 @@ def test_run_provider_browser_path_uploads_successful_downloads(
     def fake_upload(*args):
         uploads.append(args)
 
-    fake_drive_module = types.ModuleType("integrations.drive")
+    fake_drive_module = types.ModuleType("integrations.google_drive.drive")
     fake_drive_module.upload_invoice_to_drive = fake_upload
-    monkeypatch.setitem(sys.modules, "integrations.drive", fake_drive_module)
+    monkeypatch.setitem(
+        sys.modules, "integrations.google_drive.drive", fake_drive_module
+    )
     _install_fake_browser_session(monkeypatch, fake_page, fake_context)
 
     result = asyncio.run(

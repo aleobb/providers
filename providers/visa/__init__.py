@@ -12,6 +12,10 @@ from core.accounts import Account
 from core.dates import to_iso
 from core.provider import CredentialField, Provider
 from core.registry import register
+from integrations.pdf_extractor.card_statement import (
+    CardStatementData,
+    parse_visa_statement,
+)
 from .accounts import fetch_accounts as _fetch_accounts
 from .config import VisaConfig
 from .interceptor import NetworkInterceptor
@@ -67,6 +71,11 @@ class VisaProvider(Provider):
         }
         month = months[match.group(2).lower()]
         return to_iso(match.group(1), month, f"20{match.group(3)}")
+
+    def extract_card_statement_data(
+        self, text: str
+    ) -> CardStatementData | None:
+        return parse_visa_statement(text)
 
     def drive_target(
         self, period: str, banco: str = ""

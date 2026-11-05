@@ -1,4 +1,4 @@
-from integrations.drive_naming import get_drive_target
+from integrations.google_drive.naming import get_drive_target
 from providers.mastercard import MastercardProvider
 from providers.visa import VisaProvider
 

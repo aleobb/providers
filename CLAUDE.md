@@ -23,15 +23,22 @@ Script Python para loguearse en portales web de proveedores de servicios (con us
 │   ├── credential_store.py          # Perfiles cifrados de credenciales por proveedor
 │   ├── credential_cli.py            # Gestor interactivo de perfiles
 │   ├── exceptions.py                # Jerarquia de errores (InvoiceDownloaderError, LoginError, ServerUnavailableError, etc.)
-│   ├── provider.py                  # Protocol con 4 metodos: get_config, login, fetch_accounts, download_invoice
+│   ├── provider.py                  # Contrato abstracto y hooks comunes de providers
 │   ├── registry.py                  # Provider registry con register(), get_provider(), all_providers()
 │   ├── run_log.py                   # Log persistente de ejecuciones (./ejecucion.log)
 │   └── utils.py                     # unique_path() para evitar sobreescribir archivos
 ├── integrations/
-│   ├── drive.py                     # Subida de facturas a Google Drive
-│   ├── drive_naming.py              # Rutas y nombres de archivos para Drive
-│   ├── gmail_reader.py              # Deteccion de enlaces de Docuprint en Gmail
-│   └── pdf_extractor.py             # Extraccion de fecha y período desde facturas PDF
+│   ├── google_drive/
+│   │   ├── drive.py                 # Subida de facturas a Google Drive
+│   │   └── naming.py                # Rutas y nombres de archivos para Drive
+│   ├── pdf_extractor/
+│   │   ├── extractor.py             # Lectura del texto y extracción de fechas
+│   │   ├── invoice_data.py          # Extracción común de datos de facturas
+│   │   ├── card_statement.py        # Layouts Visa Nación y Mastercard BBVA/ICBC
+│   │   ├── parsing.py               # Conversión compartida de importes
+│   │   ├── csv_export.py            # Salida CSV común
+│   │   └── cli.py                   # Procesamiento por lotes de PDFs existentes
+│   └── gmail_reader.py              # Deteccion de enlaces de Docuprint en Gmail
 ├── providers/
 │   ├── __init__.py                  # Auto-import de todos los proveedores (trigger register())
 │   ├── edenor/                      # Proveedor Edenor
@@ -46,14 +53,14 @@ Script Python para loguearse en portales web de proveedores de servicios (con us
 ```
 
 ### Patron de Diseno
-- **Provider Protocol** (`core/provider.py`): interfaz runtime_checkable con 4 metodos
+- **Provider contract** (`core/provider.py`): contrato abstracto con hooks comunes y por proveedor
 - **Provider Registry** (`core/registry.py`): dict name->class con register()
 - **Auto-registration**: cada `providers/<nombre>/__init__.py` llama `register()` al importarse
 - **pydantic-settings BaseSettings**: opciones no secretas de configuración por proveedor; las credenciales de acceso se inyectan desde perfiles en SQLite.
 - **ServerUnavailableError** (`core/exceptions.py`): excepcion para errores transitorios de servidor → se loguea y continua con el siguiente proveedor
 - **Run Log** (`core/run_log.py`): log persistente append-only en `./ejecucion.log` con estado de cada descarga (OK/ERROR/SERVER_DOWN)
 - **Credenciales** (`core/credential_store.py`): perfiles múltiples por proveedor en SQLite; se cifran con Fernet usando `PROVIDERS_CREDENTIALS_KEY`, fuera de la base. `--gestionar-credenciales` administra perfiles y la migración desde `.env` se ejecuta una sola vez.
-- **Integraciones auxiliares** (`integrations/`): funciones de Gmail, Google Drive y extraccion de fechas de PDF, separadas del núcleo de descarga.
+- **Integraciones auxiliares** (`integrations/`): Gmail, Google Drive y extracción PDF en subpaquetes separados del núcleo de descarga.
 
 ### Decisiones Tecnicas Clave
 - **Playwright async** para automatizacion del browser (necesario por captchas y flujos complejos)
@@ -66,7 +73,8 @@ Script Python para loguearse en portales web de proveedores de servicios (con us
 - Como las carpetas de pruebas de proveedores no son paquetes Python, los módulos de test deben tener nombres únicos en todo el árbol para evitar colisiones de importación durante la recolección de pytest.
 - Los utilitarios manuales de Visa (`visa_debug_session.py` y `visa_test_switch.py`) viven junto a sus pruebas en `providers/visa/tests/`; no son pruebas que pytest deba ejecutar.
 - `.sessions/` y `.chrome_profile/` contienen credenciales de sesión, tokens, cookies o estado persistente del navegador: no borrarlos como limpieza de caché. `.pytest_cache/` y `.tmp/` son regenerables y están ignorados por Git.
-- La extracción común de facturas usa `pdfplumber` sobre la capa de texto; no es OCR para PDFs escaneados. Los proveedores pueden especializar importe y vencimientos mediante `invoice_data_patterns` en su clase provider.
+- La extracción común de facturas usa `pdfplumber` sobre la capa de texto; no es OCR para PDFs escaneados. Los proveedores pueden especializar importe y vencimientos mediante `invoice_data_patterns`; Visa y Mastercard tienen parsers opcionales para layouts identificados, con fechas de cierre e importes por moneda.
+- El CLI de descargas acepta `--datos-pdf-csv <ruta>`; los PDFs existentes se procesan con `python -m integrations.pdf_extractor.cli` y `--csv`. Los layouts de tarjeta no reconocidos no se clasifican automáticamente.
 
 ## Proveedores
 

@@ -168,6 +168,8 @@ def _card_dict_to_account(item: dict) -> Account | None:
             break
 
     extra: dict[str, str] = {"titular": titular}
+    if banco:
+        extra["banco"] = banco
     for key in ("cardNumber", "card_number", "id", "cardId"):
         if key in item:
             extra[key] = str(item[key])

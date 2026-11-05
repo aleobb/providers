@@ -70,11 +70,12 @@ def _extract_period_from_filename(path: Path) -> str:
     return match.group(1) if match else "-"
 
 
-def _read_text(pdf_path: Path, max_pages: int = 2) -> str:
-    """Read and join text from the first pages of a PDF."""
+def _read_text(pdf_path: Path, max_pages: int | None = 2) -> str:
+    """Read and join text from the first pages, or the whole PDF when unbounded."""
     with pdfplumber.open(str(pdf_path)) as pdf:
         parts: list[str] = []
-        for page in pdf.pages[:max_pages]:
+        pages = pdf.pages if max_pages is None else pdf.pages[:max_pages]
+        for page in pages:
             text = page.extract_text()
             if text:
                 parts.append(text)

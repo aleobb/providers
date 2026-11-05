@@ -52,7 +52,7 @@ class MetrogasProvider(Provider):
         """
         Descarga la factura del cliente indicado.
         Si page es None (sesión restaurada), usa cookies guardadas vía httpx directo.
-        El período queda como 'sin-fecha' y se corrige luego por integrations.pdf_extractor.
+        El período queda como 'sin-fecha' y se corrige luego por integrations.pdf_extractor.extractor.
         """
         if page is None:
             return await self._download_no_browser(account.client_number)
@@ -63,7 +63,7 @@ class MetrogasProvider(Provider):
     async def _download_no_browser(self, client_number: str) -> Path:
         """Descarga directa vía httpx usando cookies guardadas (sin browser)."""
         dest_dir = self._config.ensure_output_dir()
-        # El período se deja en 'sin-fecha'; integrations.pdf_extractor lo corrige al subir a Drive
+        # El período se deja en 'sin-fecha'; integrations.pdf_extractor.extractor lo corrige al subir a Drive
         dest_path = unique_path(
             dest_dir / f"metrogas_sin-fecha_{client_number}_factura.pdf"
         )

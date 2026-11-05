@@ -30,7 +30,11 @@ Aysa, Claro, Edenor, Edesur, Mastercard, Metrogas, Telecentro y Visa.
    python main.py --gestionar-credenciales
    ```
 
-La base se crea en `.credentials/providers.sqlite3` y se ignora en Git. Las contraseñas y demás campos de acceso se almacenan cifrados; la clave maestra debe proporcionarse mediante el entorno del proceso o un gestor de secretos. Al arrancar por primera vez, el programa importa una sola vez las credenciales existentes en `.env` y quita sus líneas del archivo.
+   En el gestor, selecciona un proveedor y usa `V. Ver perfil` para visualizar
+   sus credenciales guardadas. Se solicita confirmación antes de mostrar los
+   valores, incluida la contraseña descifrada, en la terminal.
+
+   La base se crea en `.credentials/providers.sqlite3` y se ignora en Git. Las contraseñas y demás campos de acceso se almacenan cifrados; la clave maestra debe proporcionarse mediante el entorno del proceso o un gestor de secretos. Al arrancar por primera vez, el programa importa una sola vez las credenciales existentes en `.env` y quita sus líneas del archivo.
 
 El esquema relaciona `providers` con `clients` en una relación de uno a muchos. Cada proveedor puede tener varios perfiles; sus credenciales se cifran y se guardan junto con el alias. `provider_credential_fields` contiene los campos requeridos por proveedor y sus etiquetas, obligatoriedad y tratamiento secreto. Las clases de cada módulo declaran los valores iniciales; al inicializarse la base se registran sin sobrescribir los metadatos ya guardados. El gestor y el flujo de ejecución consultan SQLite, en vez de mantener sus propias listas de proveedores y etiquetas.
 
@@ -44,7 +48,22 @@ Claro y Telecentro comparten en `core/network_diagnostics.py` el filtrado de dom
 
 Visa mantiene sus estrategias de descarga, selector de tarjeta, logout y extracción del período en módulos internos separados; `accounts.py` y `login.py` conservan las tareas correspondientes.
 
-Después de descargar una factura, el CLI extrae y muestra el proveedor, el importe, el vencimiento actual y el próximo vencimiento. Las reglas comunes están en `integrations/invoice_data_extractor.py`; cada proveedor puede sobrescribirlas mediante `invoice_data_patterns`. El importe se representa como `Decimal` y las fechas como `YYYY-MM-DD`; los campos que no se reconocen quedan vacíos. Esta lectura usa la capa de texto del PDF con `pdfplumber`: no es OCR y no reconoce texto en páginas escaneadas.
+Después de descargar una factura, el CLI extrae y muestra el proveedor, el importe, el vencimiento actual y el próximo vencimiento. Las reglas comunes están en `integrations/pdf_extractor/invoice_data.py`; cada proveedor puede sobrescribirlas mediante `invoice_data_patterns`. Para tarjetas también se muestran, cuando se reconoce el formato, el banco, los importes en pesos/dólares y las fechas de cierre actual y próximo. Durante una descarga, el banco de la cuenta seleccionada tiene prioridad; al procesar PDFs en lote se usa el banco que permita identificar el layout. Hay parsers para resúmenes Visa, Visa Nación y Mastercard BBVA/ICBC; el layout ICBC también reconoce el resumen con campos etiquetados (`Estado de cuenta al`, `Saldo actual` y fechas de vencimiento/cierre). No se asume que un layout no reconocido sea Visa. El importe común y las fechas se representan como `Decimal` y `YYYY-MM-DD`, respectivamente.
+
+La extracción usa la capa de texto del PDF con `pdfplumber`: no es OCR y no reconoce texto en páginas escaneadas. Durante una descarga se leen las primeras dos páginas; el procesador por lotes lee todo el PDF. Otros formatos pueden aprovechar los patrones comunes o recibir reglas específicas cuando haya PDFs de muestra representativos.
+
+Para guardar en CSV los datos extraídos durante una descarga:
+
+```powershell
+python main.py --proveedor edenor --todas --datos-pdf-csv datos.csv
+```
+
+Para procesar PDFs ya existentes en lote, los layouts de tarjeta soportados se detectan automáticamente. Para facturas de otros proveedores, indicar el proveedor:
+
+```powershell
+python -m integrations.pdf_extractor.cli resumen.pdf otro.pdf --csv datos.csv
+python -m integrations.pdf_extractor.cli --dir facturas\edenor --proveedor edenor --csv datos.csv
+```
 
 La integracion con Google Drive es opcional; sus variables tambien se documentan en `.env.example`.
 
@@ -54,10 +73,19 @@ La integracion con Google Drive es opcional; sus variables tambien se documentan
 python main.py --proveedor edenor --todas
 python main.py --proveedor metrogas --listar
 python main.py --todos-proveedores --todas
+python main.py --proveedor mastercard --todas --datos-pdf-csv datos.csv
 ```
 
 Las facturas se guardan localmente en `facturas/`. Para completar verificaciones humanas en un portal, usar `--debug` cuando corresponda.
 Si un proveedor tiene varios perfiles, el programa solicita cuál usar; si solo tiene uno, lo selecciona automáticamente.
+
+Para abrir el portal de un proveedor con login automático y dejar Chrome abierto para navegar manualmente:
+
+```powershell
+python main.py --proveedor edenor --ingresar
+```
+
+Este modo usa las credenciales guardadas y el perfil persistente del proveedor; no descarga facturas, consulta cuentas ni ejecuta logout. La terminal permanece activa hasta cerrar la ventana de Chrome. CAPTCHA, MFA u otras verificaciones del proveedor pueden requerir completar un paso manualmente.
 
 ## Desarrollo
 

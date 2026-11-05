@@ -8,6 +8,11 @@ from playwright.async_api import BrowserContext, Page
 from core.accounts import Account
 from core.provider import Provider
 from core.registry import register
+from integrations.pdf_extractor.card_statement import (
+    CardStatementData,
+    parse_mastercard_bbva,
+    parse_mastercard_icbc,
+)
 from .accounts import fetch_accounts as _fetch_accounts
 from .config import MastercardConfig
 from .invoice import InvoiceService
@@ -32,6 +37,11 @@ class MastercardProvider(Provider):
 
     def get_config(self) -> MastercardConfig:
         return self._config
+
+    def extract_card_statement_data(
+        self, text: str
+    ) -> CardStatementData | None:
+        return parse_mastercard_bbva(text) or parse_mastercard_icbc(text)
 
     def drive_target(
         self, period: str, banco: str = ""

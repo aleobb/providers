@@ -1,5 +1,5 @@
-from integrations import pdf_extractor
-from integrations.drive_naming import get_drive_target
+from integrations.pdf_extractor import extractor as pdf_extractor
+from integrations.google_drive.naming import get_drive_target
 from providers.edenor import EdenorProvider
 
 

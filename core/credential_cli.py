@@ -35,6 +35,7 @@ def _manage_provider(store: CredentialStore, provider: str) -> None:
         profiles = store.list_profiles(provider)
         print(f"\n{provider_details.display_name} — perfiles guardados:")
         _print_profiles(profiles)
+        print("  V. Ver perfil (mostrar credenciales)")
         print("  A. Agregar perfil")
         print("  E. Editar perfil")
         print("  B. Borrar perfil")
@@ -43,7 +44,13 @@ def _manage_provider(store: CredentialStore, provider: str) -> None:
         if choice == "0":
             return
         try:
-            if choice == "a":
+            if choice == "v":
+                profile = _select_profile(store, profiles)
+                if profile and input(
+                    "¿Mostrar las credenciales en texto plano? [s/N]: "
+                ).strip().lower() == "s":
+                    _view_profile(store, profile)
+            elif choice == "a":
                 _add_profile(store, provider)
             elif choice == "e":
                 profile = _select_profile(store, profiles)
@@ -68,6 +75,18 @@ def _print_profiles(profiles: list[CredentialProfileSummary]) -> None:
         return
     for profile in profiles:
         print(f"  - {profile.alias}")
+
+
+def _view_profile(store: CredentialStore, profile: CredentialProfile) -> None:
+    fields = store.get_credential_fields(profile.provider)
+    labels = {field.name: field.label for field in fields}
+    print(f"\nCredenciales de «{profile.alias}»:")
+    for field in fields:
+        value = profile.credentials.get(field.name, "") or "(vacío)"
+        print(f"  {field.label}: {value}")
+    for name, value in profile.credentials.items():
+        if name not in labels:
+            print(f"  {name}: {value or '(vacío)'}")
 
 
 def _select_profile(

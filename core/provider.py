@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, ClassVar, Mapping
 
 from playwright.async_api import BrowserContext, Page
 
+from integrations.pdf_extractor.card_statement import CardStatementData
+
 from .accounts import Account
 from .config import BaseProviderConfig
 from .dates import extract_date_from_patterns
@@ -87,6 +89,12 @@ class Provider(ABC):
 
     def extract_invoice_date(self, text: str) -> str | None:
         return extract_date_from_patterns(text, self.invoice_date_patterns)
+
+    def extract_card_statement_data(
+        self, text: str
+    ) -> CardStatementData | None:
+        """Extract optional card-only fields from a recognized statement layout."""
+        return None
 
     def drive_target(
         self, period: str, banco: str = ""

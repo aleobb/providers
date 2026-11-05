@@ -24,8 +24,12 @@ from .provider import Provider
 from .registry import all_provider_names, all_providers, get_provider
 from .utils import dismiss_popups
 from . import run_log
-from integrations.pdf_extractor import determine_invoice_period
-from integrations.invoice_data_extractor import extract_invoice_data
+from integrations.pdf_extractor.extractor import determine_invoice_period
+from integrations.pdf_extractor.csv_export import (
+    invoice_data_to_csv_row,
+    write_invoice_data_csv,
+)
+from integrations.pdf_extractor.invoice_data import extract_invoice_data
 
 
 def parse_args() -> dict:
@@ -40,6 +44,8 @@ def parse_args() -> dict:
         "todos_proveedores": False,
         "url": None,
         "gestionar_credenciales": False,
+        "datos_pdf_csv": None,
+        "ingresar": False,
     }
     i = 0
     while i < len(args):
@@ -59,8 +65,13 @@ def parse_args() -> dict:
             i += 1
         elif args[i] == "--todos-proveedores":
             result["todos_proveedores"] = True
+        elif args[i] == "--ingresar":
+            result["ingresar"] = True
         elif args[i] == "--gestionar-credenciales":
             result["gestionar_credenciales"] = True
+        elif args[i] == "--datos-pdf-csv" and i + 1 < len(args):
+            result["datos_pdf_csv"] = args[i + 1]
+            i += 1
         elif args[i] == "--url" and i + 1 < len(args):
             result["url"] = args[i + 1]
             i += 1
@@ -92,7 +103,7 @@ def _upload_if_enabled(
     if not drive_uploader or not drive_root_id:
         return
     banco = account.extra.get("banco", "") if account.extra else ""
-    from integrations.drive import upload_invoice_to_drive
+    from integrations.google_drive.drive import upload_invoice_to_drive
 
     upload_invoice_to_drive(
         drive_uploader, drive_root_id, provider, period, path, banco
@@ -105,10 +116,14 @@ def _record_download_success(
     path: Path,
     drive_uploader,
     drive_root_id: str,
+    invoice_data_rows: list[dict[str, str]] | None = None,
 ) -> None:
     period = determine_invoice_period(path, provider.extract_invoice_date)
     run_log.log_ok(provider.name, account.client_number, period, path)
-    invoice_data = extract_invoice_data(path, provider)
+    account_bank = (getattr(account, "extra", None) or {}).get("banco")
+    invoice_data = extract_invoice_data(
+        path, provider, bank_name=account_bank
+    )
     amount = f"{invoice_data.amount:.2f}" if invoice_data.amount is not None else "-"
     current_due = invoice_data.current_due_date or "-"
     next_due = invoice_data.next_due_date or "-"
@@ -126,6 +141,26 @@ def _record_download_success(
         f"importe={amount}; vencimiento_actual={current_due}; "
         f"proximo_vto={next_due}; texto={text_status}"
     )
+    if invoice_data.bank_name:
+        amount_ars = (
+            f"{invoice_data.amount_ars:.2f}"
+            if invoice_data.amount_ars is not None
+            else "-"
+        )
+        amount_usd = (
+            f"{invoice_data.amount_usd:.2f}"
+            if invoice_data.amount_usd is not None
+            else "-"
+        )
+        print(
+            f"  Resumen tarjeta: banco={invoice_data.bank_name}; "
+            f"cierre_actual={invoice_data.current_closing_date or '-'}; "
+            f"proximo_cierre={invoice_data.next_closing_date or '-'}; "
+            f"importe_pesos={amount_ars}; "
+            f"importe_dolares={amount_usd}"
+        )
+    if invoice_data_rows is not None:
+        invoice_data_rows.append(invoice_data_to_csv_row(path, invoice_data))
     _upload_if_enabled(
         provider, account, period, path, drive_uploader, drive_root_id
     )
@@ -140,6 +175,7 @@ async def _download_all_accounts(
     drive_root_id: str,
     *,
     without_browser: bool,
+    invoice_data_rows: list[dict[str, str]] | None = None,
 ) -> bool:
     results = []
     for index, account in enumerate(accounts, 1):
@@ -156,13 +192,15 @@ async def _download_all_accounts(
             if without_browser:
                 try:
                     _record_download_success(
-                        provider, account, path, drive_uploader, drive_root_id
+                        provider, account, path, drive_uploader, drive_root_id,
+                        invoice_data_rows,
                     )
                 except Exception as record_error:
                     path, error = None, record_error
             else:
                 _record_download_success(
-                    provider, account, path, drive_uploader, drive_root_id
+                    provider, account, path, drive_uploader, drive_root_id,
+                    invoice_data_rows,
                 )
 
         if error:
@@ -197,6 +235,7 @@ async def _run_provider_no_browser(
     cuenta: str | None,
     drive_uploader,
     drive_root_id: str,
+    invoice_data_rows: list[dict[str, str]] | None = None,
 ) -> bool:
     """
     Descarga facturas usando sesión guardada — sin abrir el browser.
@@ -214,6 +253,7 @@ async def _run_provider_no_browser(
             drive_uploader,
             drive_root_id,
             without_browser=True,
+            invoice_data_rows=invoice_data_rows,
         )
 
     account = select_account(accounts, cuenta)
@@ -229,7 +269,8 @@ async def _run_provider_no_browser(
         raise
     print(f"\nFactura descargada: {pdf_path.resolve()}")
     _record_download_success(
-        provider, account, pdf_path, drive_uploader, drive_root_id
+        provider, account, pdf_path, drive_uploader, drive_root_id,
+        invoice_data_rows,
     )
     return True
 
@@ -245,6 +286,7 @@ async def _run_provider(
     drive_root_id: str = "",
     nosession: bool = False,
     credential_store: CredentialStore | None = None,
+    invoice_data_rows: list[dict[str, str]] | None = None,
 ) -> bool:
     """Run a single provider. Returns True on full success."""
     from core import session_store
@@ -280,7 +322,8 @@ async def _run_provider(
                 if accounts is not None:
                     run_log.log_run_start([provider.name])
                     return await _run_provider_no_browser(
-                        provider, accounts, todas, cuenta, drive_uploader, drive_root_id
+                        provider, accounts, todas, cuenta, drive_uploader,
+                        drive_root_id, invoice_data_rows,
                     )
                 else:
                     print("Sesión expirada. Haciendo login con browser...")
@@ -343,6 +386,7 @@ async def _run_provider(
                 drive_uploader,
                 drive_root_id,
                 without_browser=False,
+                invoice_data_rows=invoice_data_rows,
             )
 
         # Single account
@@ -354,7 +398,8 @@ async def _run_provider(
         pdf_path = await provider.download_invoice(service_page, service_context, account)
         print(f"\nFactura descargada: {pdf_path.resolve()}")
         _record_download_success(
-            provider, account, pdf_path, drive_uploader, drive_root_id
+            provider, account, pdf_path, drive_uploader, drive_root_id,
+            invoice_data_rows,
         )
         return True
 
@@ -377,6 +422,7 @@ async def run_provider(
     drive_root_id: str = "",
     nosession: bool = False,
     credential_store: CredentialStore | None = None,
+    invoice_data_rows: list[dict[str, str]] | None = None,
 ) -> bool:
     """Run a single provider and release its resources."""
     try:
@@ -390,6 +436,61 @@ async def run_provider(
             drive_uploader=drive_uploader,
             drive_root_id=drive_root_id,
             nosession=nosession,
+            credential_store=credential_store,
+            invoice_data_rows=invoice_data_rows,
+        )
+    finally:
+        await provider.close()
+
+
+async def _login_provider(
+    provider: Provider,
+    *,
+    url: str | None,
+    credential_store: CredentialStore | None,
+) -> bool:
+    config = provider.get_config()
+    if provider.requires_credentials:
+        credential_store = credential_store or CredentialStore()
+        profile = credential_store.request_credentials(provider.name)
+        provider.configure_credentials(
+            profile,
+            len(credential_store.list_profiles(provider.name)),
+            Path(__file__).resolve().parents[1] / ".sessions",
+        )
+    config.headless = False
+    provider.apply_run_options(url=url)
+
+    print(f"\nIngresando a {provider.display_name}...")
+    async with BrowserSession(config, profile_name=provider.session_key) as session:
+        await provider.login(session.page, session.context)
+        await asyncio.sleep(2)
+        for _ in range(3):
+            closed = await dismiss_popups(session.page, label=provider.name)
+            if not closed:
+                break
+            await asyncio.sleep(0.5)
+
+        print(
+            "Login completado. El portal quedará abierto; "
+            "cerrá la ventana para finalizar."
+        )
+        await session.page.wait_for_event("close")
+    print(f"Ventana de {provider.display_name} cerrada.")
+    return True
+
+
+async def login_provider(
+    provider: Provider,
+    *,
+    url: str | None = None,
+    credential_store: CredentialStore | None = None,
+) -> bool:
+    """Log in visibly and keep the provider portal open until Chrome closes."""
+    try:
+        return await _login_provider(
+            provider,
+            url=url,
             credential_store=credential_store,
         )
     finally:
@@ -406,7 +507,24 @@ async def run(
     url: str | None = None,
     nosession: bool = False,
     credential_store: CredentialStore | None = None,
+    datos_pdf_csv: str | None = None,
+    ingresar: bool = False,
 ) -> None:
+    if ingresar and (
+        todos_proveedores
+        or not proveedor
+        or listar
+        or todas
+        or cuenta is not None
+        or datos_pdf_csv is not None
+    ):
+        print(
+            "--ingresar requiere un único --proveedor y no se combina con "
+            "--listar, --todas, --cuenta ni --datos-pdf-csv.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     if todos_proveedores:
         providers = all_providers()
         if not providers:
@@ -427,6 +545,25 @@ async def run(
             )
             sys.exit(1)
 
+    if ingresar:
+        try:
+            await login_provider(
+                providers[0],
+                url=url,
+                credential_store=credential_store,
+            )
+        except ServerUnavailableError as error:
+            print(
+                f"\n[{providers[0].display_name}] Servidor no disponible: "
+                f"{error}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        except (InvoiceDownloaderError, CredentialStoreError) as error:
+            print(f"\nERROR [{providers[0].display_name}]: {error}", file=sys.stderr)
+            sys.exit(1)
+        return
+
     if debug:
         print("[DEBUG] Modo headless desactivado - el browser sera visible.")
 
@@ -435,7 +572,7 @@ async def run(
     drive_root_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "").strip()
     if drive_root_id and os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip():
         try:
-            from integrations.drive import DriveUploader
+            from integrations.google_drive.drive import DriveUploader
             drive_uploader = DriveUploader()
             print(f"[Drive] Uploader iniciado. Carpeta raíz: {drive_root_id}")
         except Exception as e:
@@ -446,6 +583,9 @@ async def run(
         run_log.log_run_start([p.name for p in providers])
 
     all_ok = True
+    invoice_data_rows: list[dict[str, str]] | None = (
+        [] if datos_pdf_csv else None
+    )
     for provider in providers:
         try:
             ok = await run_provider(
@@ -455,6 +595,7 @@ async def run(
                 drive_root_id=drive_root_id,
                 nosession=nosession,
                 credential_store=credential_store,
+                invoice_data_rows=invoice_data_rows,
             )
             if not ok:
                 all_ok = False
@@ -471,6 +612,18 @@ async def run(
         except CredentialStoreError as e:
             print(f"\nERROR [{provider.display_name}]: {e}", file=sys.stderr)
             all_ok = False
+
+    if datos_pdf_csv and invoice_data_rows is not None:
+        try:
+            write_invoice_data_csv(Path(datos_pdf_csv), invoice_data_rows)
+        except OSError as error:
+            print(
+                f"\nERROR: No se pudo escribir el CSV {datos_pdf_csv}: {error}",
+                file=sys.stderr,
+            )
+            all_ok = False
+        else:
+            print(f"Datos de facturas guardados en: {datos_pdf_csv}")
 
     if not all_ok:
         sys.exit(1)

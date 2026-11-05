@@ -4,7 +4,7 @@ import sqlite3
 import pytest
 from cryptography.fernet import Fernet
 
-from core.credential_cli import _prompt_credentials
+from core.credential_cli import _prompt_credentials, manage_credentials
 from core.credential_store import (
     CredentialProfile,
     CredentialStore,
@@ -262,6 +262,57 @@ def test_choosing_between_profiles_uses_interactive_selection(
 
     assert selected.id == work_id
     assert selected.alias == "Trabajo"
+
+
+def test_credential_manager_can_show_decrypted_profile(
+    credential_store, monkeypatch, capsys
+):
+    credential_store.add_profile(
+        "edenor",
+        "Casa",
+        {"email": "home@example.com", "password": "plain-text-secret"},
+    )
+    provider_index = next(
+        index
+        for index, provider in enumerate(credential_store.list_providers(), 1)
+        if provider.name == "edenor"
+    )
+    choices = iter([str(provider_index), "v", "1", "s", "0", "0"])
+    prompts = []
+
+    def input_with_recorded_prompt(prompt):
+        prompts.append(prompt)
+        return next(choices)
+
+    monkeypatch.setattr("builtins.input", input_with_recorded_prompt)
+
+    manage_credentials(credential_store)
+
+    output = capsys.readouterr().out
+    assert "Email: home@example.com" in output
+    assert "Contraseña: plain-text-secret" in output
+    assert any("texto plano" in prompt for prompt in prompts)
+
+
+def test_credential_manager_hides_profile_when_plain_text_display_is_declined(
+    credential_store, monkeypatch, capsys
+):
+    credential_store.add_profile(
+        "edenor", "Casa", {"email": "home@example.com", "password": "secret"}
+    )
+    provider_index = next(
+        index
+        for index, provider in enumerate(credential_store.list_providers(), 1)
+        if provider.name == "edenor"
+    )
+    choices = iter([str(provider_index), "v", "1", "n", "0", "0"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(choices))
+
+    manage_credentials(credential_store)
+
+    output = capsys.readouterr().out
+    assert "home@example.com" not in output
+    assert "secret" not in output
 
 
 def test_updating_credentials_changes_profile_session_version(credential_store):

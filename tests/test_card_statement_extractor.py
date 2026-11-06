@@ -33,6 +33,32 @@ def test_extracts_visa_nacion_statement_fields():
     assert detect_card_provider(text) == "visa"
 
 
+def test_extracts_visa_nacion_row_with_no_minimum_payment():
+    text = (
+        "VISA CLASSIC\n"
+        "CUENTA NACION AHORRO\n"
+        "BEN ALEJANDRO OSVALDO CIERRE ACTUAL: 22 Oct 26\n"
+        "JACINTO ROSSO 698 VENCIMIENTO SALDO $ SALDO U$S "
+        "PAGO MIN.$ PAGO MIN.U$S\n"
+        "1834 TEMPERLEY 04 Nov 26 1,27- 0,00 -,-- -,--\n"
+        "VTO. ANTERIOR 0 7 O c t 2 6 SALDO ANTERIOR $ "
+        "4 0 4 8 0 , 0 0 U$S 0 , 0 0 PROXIMO CIERRE 19 Nov 26\n"
+        "CIERRE ANTERIOR 2 4 S e p 2 6 PAGO MIN. ANT. $ "
+        "8 4 8 0 , 0 0 PROXIMO VTO. 02 Dic 26"
+    )
+
+    data = parse_visa_statement(text)
+
+    assert data is not None
+    assert data.bank_name == "Nación"
+    assert data.current_due_date == "2026-11-04"
+    assert data.next_due_date == "2026-12-02"
+    assert data.current_closing_date == "2026-10-22"
+    assert data.next_closing_date == "2026-11-19"
+    assert data.amount_ars == Decimal("-1.27")
+    assert data.amount_usd == Decimal("0.00")
+
+
 def test_extracts_mastercard_bbva_statement_fields():
     text = (
         "MASTERCARD BANCO BBVA\n"
@@ -54,6 +80,33 @@ def test_extracts_mastercard_bbva_statement_fields():
     assert data.next_closing_date == "2026-10-20"
     assert data.amount_ars == Decimal("10500.00")
     assert data.amount_usd == Decimal("12.25")
+    assert detect_card_provider(text) == "mastercard"
+
+
+def test_extracts_mastercard_bbva_consolidated_table_layout():
+    text = (
+        "Mastercard Internacional CONSOLIDADO\n"
+        "AVBB\n"
+        "ocnaB\n"
+        "CIERRE ACTUAL VENCIMIENTO ACTUAL SALDO ACTUAL $ "
+        "SALDO ACTUAL U$S PAGO MÍNIMO $\n"
+        "29-Oct-26 11-Nov-26 404.204,00 27,56 33.165,00\n"
+        "CIERRE ANTERIOR VENCIMIENTO ANTERIOR PRÓXIMO CIERRE "
+        "PRÓXIMO VENCIMIENTO\n"
+        "Otros períodos\n"
+        "01-Oct-26 09-Oct-26 26-Nov-26 09-Dic-26\n"
+    )
+
+    data = parse_mastercard_bbva(text)
+
+    assert data is not None
+    assert data.bank_name == "BBVA"
+    assert data.current_closing_date == "2026-10-29"
+    assert data.current_due_date == "2026-11-11"
+    assert data.next_closing_date == "2026-11-26"
+    assert data.next_due_date == "2026-12-09"
+    assert data.amount_ars == Decimal("404204.00")
+    assert data.amount_usd == Decimal("27.56")
     assert detect_card_provider(text) == "mastercard"
 
 
@@ -134,6 +187,27 @@ def test_extracts_visa_layout_with_prefixed_due_row_and_spaced_month():
     assert detect_card_provider(text) == "visa"
 
 
+def test_detects_bbva_from_visa_statement_footer():
+    text = (
+        "VISA CLASSIC\n"
+        "CIERRE ACTUAL: 29 Oct 26\n"
+        "VENCIMIENTO SALDO $ SALDO U$S PAGO MIN.$ PAGO MIN.U$S\n"
+        "CAP.FEDERAL 11 Nov 26 1.237.599,37 0,03- 80.000,00 -,--\n"
+        "VTO. ANTERIOR 09 Oct 26 SALDO ANTERIOR $ 664.510,74 "
+        "U$S 3,01 PROXIMO CIERRE 26 Nov 26\n"
+        "CIERRE ANTERIOR 01 Oct 26 PAGO MIN. ANT. $ 47.180,00 "
+        "PROXIMO VTO. 09 Dic 26\n"
+        "Para más información consultá www.bbva.com.ar"
+    )
+
+    data = parse_visa_statement(text)
+
+    assert data is not None
+    assert data.bank_name == "BBVA"
+    assert data.current_due_date == "2026-11-11"
+    assert data.amount_usd == Decimal("-0.03")
+
+
 def test_extracts_visa_balance_when_year_touches_amount_and_usd_has_dash():
     text = (
         "VISA\n"
@@ -151,7 +225,7 @@ def test_extracts_visa_balance_when_year_touches_amount_and_usd_has_dash():
     assert data is not None
     assert data.current_due_date == "2026-11-11"
     assert data.amount_ars == Decimal("1234.56")
-    assert data.amount_usd == Decimal("0.03")
+    assert data.amount_usd == Decimal("-0.03")
     assert data.next_due_date == "2026-12-09"
     assert data.current_closing_date == "2026-10-29"
     assert data.next_closing_date == "2026-11-26"

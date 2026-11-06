@@ -44,7 +44,8 @@ _VISA_CURRENT_CLOSE = re.compile(
     rf"CIERRE\s+ACTUAL:\s*({_DATE_WORD})", re.IGNORECASE
 )
 _VISA_CURRENT_DUE_AND_BALANCES = re.compile(
-    rf"^({_DATE_WORD})\s+([\d.,]+)\s+([\d.,]+-?)\s+[\d.,]+"
+    rf"^({_DATE_WORD})\s+([\d.,]+-?)\s+([\d.,]+-?)\s+"
+    r"(?:-,--|-?[\d.,]+)"
     r"(?:\s+(-,--|[\d.,]+))?",
     re.IGNORECASE | re.MULTILINE,
 )
@@ -64,7 +65,8 @@ _VISA_FLEX_CURRENT_CLOSE = re.compile(
     rf"CIERRE\s+ACTUAL:\s*({_FLEX_DATE_WORD})", re.IGNORECASE
 )
 _VISA_FLEX_CURRENT_DUE_AND_BALANCES = re.compile(
-    rf"^\s*.*?\b({_FLEX_DATE_WORD})\s*([\d.,]+)\s+([\d.,]+-?)\s+[\d.,]+"
+    rf"^\s*.*?\b({_FLEX_DATE_WORD})\s*([\d.,]+-?)\s+([\d.,]+-?)\s+"
+    r"(?:-,--|-?[\d.,]+)"
     r"(?:\s+(-,--|[\d.,]+))?",
     re.IGNORECASE | re.MULTILINE,
 )
@@ -86,6 +88,17 @@ _BBVA_PATTERNS = {
     "next_closing_date": rf"PR[ÓO]XIMO\s+CIERRE\s+({_DATE_DASHED})",
     "next_due_date": rf"PR[ÓO]XIMO\s+VENCIMIENTO\s+({_DATE_DASHED})",
 }
+_BBVA_TABLE_CURRENT = re.compile(
+    rf"CIERRE\s+ACTUAL[^\r\n]*\r?\n\s*({_DATE_DASHED})\s+"
+    rf"({_DATE_DASHED})\s+(-?[\d.,]+)\s+(-?[\d.,]+)",
+    re.IGNORECASE,
+)
+_BBVA_TABLE_NEXT_PERIOD = re.compile(
+    rf"CIERRE\s+ANTERIOR[^\r\n]*(?:\r?\n[^\r\n]*){{0,3}}?"
+    rf"\r?\n\s*({_DATE_DASHED})\s+"
+    rf"({_DATE_DASHED})\s+({_DATE_DASHED})\s+({_DATE_DASHED})",
+    re.IGNORECASE,
+)
 _ICBC_PATTERN = re.compile(
     rf"U\$S\s*([\d.,]+?)({_DATE_DASHED})\s+"
     rf"({_DATE_DASHED})\s+([\d.,]+)\s+([\d.,]+)"
@@ -227,7 +240,7 @@ def parse_visa_statement(text: str) -> CardStatementData | None:
         return None
 
     return _build_statement(
-        None,
+        _detect_visa_bank(text),
         current_due.group(1),
         next_due.group(2),
         current_close.group(1),
@@ -237,23 +250,51 @@ def parse_visa_statement(text: str) -> CardStatementData | None:
     )
 
 
+def _detect_visa_bank(text: str) -> str | None:
+    if re.search(r"\b(?:BANCO\s+)?BBVA\b|BBVA\.COM\.AR|\bAVBB\b", text, re.I):
+        return "BBVA"
+    if re.search(r"\b(?:BANCO\s+)?NACI[ÓO]N\b|CUENTA\s+NACI[ÓO]N", text, re.I):
+        return "Nación"
+    return None
+
+
 def parse_mastercard_bbva(text: str) -> CardStatementData | None:
-    if "MASTERCARD" not in text.upper() or "BANCO BBVA" not in text.upper():
+    upper_text = text.upper()
+    if "MASTERCARD" not in upper_text or not (
+        "BBVA" in upper_text or "AVBB" in upper_text
+    ):
         return None
     values: dict[str, str] = {}
     for field, pattern in _BBVA_PATTERNS.items():
         match = re.search(pattern, text, re.IGNORECASE)
         if match is None:
-            return None
+            break
         values[field] = match.group(1)
+    if len(values) == len(_BBVA_PATTERNS):
+        statement = _build_statement(
+            "BBVA",
+            values["current_due_date"],
+            values["next_due_date"],
+            values["current_closing_date"],
+            values["next_closing_date"],
+            values["amount_ars"],
+            values["amount_usd"],
+        )
+        if statement is not None:
+            return statement
+
+    current = _BBVA_TABLE_CURRENT.search(text)
+    next_period = _BBVA_TABLE_NEXT_PERIOD.search(text)
+    if current is None or next_period is None:
+        return None
     return _build_statement(
         "BBVA",
-        values["current_due_date"],
-        values["next_due_date"],
-        values["current_closing_date"],
-        values["next_closing_date"],
-        values["amount_ars"],
-        values["amount_usd"],
+        current.group(2),
+        next_period.group(4),
+        current.group(1),
+        next_period.group(3),
+        current.group(3),
+        current.group(4),
     )
 
 

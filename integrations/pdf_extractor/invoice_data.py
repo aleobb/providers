@@ -28,6 +28,7 @@ class InvoiceData:
     next_closing_date: str | None = None
     amount_ars: Decimal | None = None
     amount_usd: Decimal | None = None
+    holder_name: str | None = None
 
 
 _DATE = r"(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})"
@@ -113,6 +114,7 @@ def extract_invoice_data_from_text(
         next_closing_date=card_data.next_closing_date if card_data else None,
         amount_ars=card_data.amount_ars if card_data else None,
         amount_usd=card_data.amount_usd if card_data else None,
+        holder_name=_extract_holder_name(text),
     )
 
 
@@ -140,4 +142,28 @@ def _extract_date(text: str, patterns: tuple[str, ...]) -> str | None:
         except (IndexError, ValueError):
             continue
         return result
+    return None
+
+
+_HOLDER_NAME_PATTERNS = (
+    r"\b(?:titular(?:\s+de\s+(?:la\s+)?(?:cuenta|servicio))?|"
+    r"nombre\s+del\s+titular|receptor)\s*[:\-]\s*([^\r\n]+)",
+    r"\bcliente\s*[:\-]\s*([^\r\n]+)",
+)
+_HOLDER_TRAILING_LABELS = re.compile(
+    r"\s+(?:CIERRE\s+ACTUAL|VENCIMIENTO|N[°º]\s*DE\s*CUENTA|"
+    r"NRO\.?\s*DE\s*CUENTA|CUIT|DNI)\b.*$",
+    re.IGNORECASE,
+)
+
+
+def _extract_holder_name(text: str) -> str | None:
+    for pattern in _HOLDER_NAME_PATTERNS:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match is None:
+            continue
+        holder_name = _HOLDER_TRAILING_LABELS.sub("", match.group(1))
+        holder_name = re.sub(r"\s+", " ", holder_name).strip(" \t:;,-")
+        if holder_name:
+            return holder_name
     return None

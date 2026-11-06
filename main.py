@@ -11,6 +11,7 @@ Uso:
     python main.py --proveedor <nombre> --ingresar
     python main.py --proveedor <nombre> --todas --datos-pdf-csv datos.csv
     python main.py --proveedor <nombre> --todas --airtable
+    python main.py --airtable-documento <ruta.pdf> [--proveedor <nombre>] [--banco <nombre>]
 
 Procesar PDFs existentes:
     python -m integrations.pdf_extractor.cli --dir facturas --csv datos.csv

@@ -24,6 +24,12 @@ class FakeTable:
         self.formulas.append(formula)
         return self.records
 
+    def get(self, record_id, *, fields=None):
+        for record in self.records:
+            if record["id"] == record_id:
+                return record
+        raise KeyError(record_id)
+
     def create(self, fields, *, typecast):
         assert typecast is True
         self.created.append(fields)
@@ -73,13 +79,20 @@ def _pdf(tmp_path, filename="invoice.pdf"):
     return path
 
 
-def _sync(concept_records=None, invoice_records=None):
+def _sync(concept_records=None, invoice_records=None, subject_records=None):
     invoices = FakeTable(invoice_records)
     concepts = FakeTable(concept_records)
+    subjects = FakeTable(subject_records)
     config = AirtableConfig(token="token", base_id="base")
     sync = AirtableInvoiceSync(
         config,
-        api=FakeApi({"Comprobantes": invoices, "Conceptos": concepts}),
+        api=FakeApi(
+            {
+                "Comprobantes": invoices,
+                "Conceptos": concepts,
+                "Sujetos": subjects,
+            }
+        ),
     )
     return sync, invoices, concepts
 
@@ -108,6 +121,140 @@ def test_create_invoice_with_concept_and_extracted_fields(tmp_path):
         ("rec-new", "Doc.", path, "application/pdf")
     ]
     assert result.attachment_uploaded is True
+
+
+def test_invoice_concept_uses_holder_subject(tmp_path):
+    sync, invoices, _ = _sync(
+        concept_records=[
+            {
+                "id": "rec-ana",
+                "fields": {
+                    "Nombre": "Visa Galicia Ana",
+                    "Sujeto": ["sub-ana"],
+                },
+            },
+            {
+                "id": "rec-alejandro",
+                "fields": {
+                    "Nombre": "Visa Galicia",
+                    "Sujeto": ["sub-alejandro"],
+                },
+            },
+        ],
+        subject_records=[
+            {
+                "id": "sub-ana",
+                "fields": {"Indentificacion": "Ana M."},
+            },
+            {
+                "id": "sub-alejandro",
+                "fields": {"Indentificacion": "Alejandro"},
+            },
+        ],
+    )
+
+    sync.sync_invoice(
+        _pdf(tmp_path),
+        _data(holder_name="BEN ALEJANDRO OSVALDO"),
+    )
+
+    assert invoices.created[0]["Concepto"] == ["rec-alejandro"]
+
+
+def test_subject_initial_matches_full_holder_name(tmp_path):
+    sync, invoices, _ = _sync(
+        concept_records=[
+            {
+                "id": "rec-ana",
+                "fields": {
+                    "Nombre": "Visa Nacion Ana M.",
+                    "Sujeto": ["sub-ana"],
+                },
+            },
+            {
+                "id": "rec-alejandro",
+                "fields": {
+                    "Nombre": "Visa Nacion",
+                    "Sujeto": ["sub-alejandro"],
+                },
+            },
+        ],
+        subject_records=[
+            {
+                "id": "sub-ana",
+                "fields": {"Indentificacion": "Ana M."},
+            },
+            {
+                "id": "sub-alejandro",
+                "fields": {"Indentificacion": "Alejandro"},
+            },
+        ],
+    )
+
+    sync.sync_invoice(
+        _pdf(tmp_path, "visa_ana.pdf"),
+        _data(
+            provider_name="Visa (Prisma)",
+            bank_name="Nación",
+            holder_name="CATALANO ANA MARIA",
+        ),
+    )
+
+    assert invoices.created[0]["Concepto"] == ["rec-ana"]
+
+
+def test_missing_document_holder_defaults_concept_subject_to_alejandro(
+    tmp_path,
+):
+    sync, invoices, _ = _sync(
+        concept_records=[
+            {
+                "id": "rec-ana",
+                "fields": {
+                    "Nombre": "Visa Galicia Ana",
+                    "Sujeto": ["sub-ana"],
+                },
+            },
+            {
+                "id": "rec-alejandro",
+                "fields": {
+                    "Nombre": "Visa Galicia",
+                    "Sujeto": ["sub-alejandro"],
+                },
+            },
+        ],
+        subject_records=[
+            {
+                "id": "sub-ana",
+                "fields": {"Indentificacion": "Ana M."},
+            },
+            {
+                "id": "sub-alejandro",
+                "fields": {"Indentificacion": "Alejandro"},
+            },
+        ],
+    )
+
+    sync.sync_invoice(_pdf(tmp_path), _data(holder_name=None))
+
+    assert invoices.created[0]["Concepto"] == ["rec-alejandro"]
+
+
+def test_visa_concept_uses_detected_issuing_bank(tmp_path):
+    sync, invoices, _ = _sync(
+        concept_records=[
+            {"id": "rec-bbva", "fields": {"Nombre": "Visa BBVA"}},
+            {"id": "rec-nacion", "fields": {"Nombre": "Visa Nación"}},
+            {"id": "rec-galicia", "fields": {"Nombre": "Visa Galicia"}},
+        ]
+    )
+
+    sync.sync_invoice(
+        _pdf(tmp_path, "visa_bbva.pdf"),
+        _data(bank_name="BBVA"),
+    )
+
+    assert invoices.created[0]["Concepto"] == ["rec-bbva"]
 
 
 def test_update_existing_invoice_without_clearing_missing_values(tmp_path):
@@ -176,8 +323,14 @@ def test_missing_concept_does_not_create_invoice(tmp_path):
 def test_ambiguous_concept_does_not_create_invoice(tmp_path):
     sync, invoices, _ = _sync(
         concept_records=[
-            {"id": "rec-one", "fields": {"Nombre": "Visa Galicia"}},
-            {"id": "rec-two", "fields": {"Nombre": "Visa Galicia Compartida"}},
+            {
+                "id": "rec-one",
+                "fields": {"Nombre": "Visa Galicia Compartida"},
+            },
+            {
+                "id": "rec-two",
+                "fields": {"Nombre": "Visa Galicia Principal"},
+            },
         ]
     )
 
@@ -185,6 +338,22 @@ def test_ambiguous_concept_does_not_create_invoice(tmp_path):
         sync.sync_invoice(_pdf(tmp_path), _data())
 
     assert invoices.created == []
+
+
+def test_exact_provider_and_bank_concept_wins_over_broader_matches(tmp_path):
+    sync, invoices, _ = _sync(
+        concept_records=[
+            {
+                "id": "rec-shared",
+                "fields": {"Nombre": "Visa Galicia Compartida"},
+            },
+            {"id": "rec-exact", "fields": {"Nombre": "Visa Galicia"}},
+        ]
+    )
+
+    sync.sync_invoice(_pdf(tmp_path), _data())
+
+    assert invoices.created[0]["Concepto"] == ["rec-exact"]
 
 
 def test_ambiguous_invoice_is_not_updated(tmp_path):

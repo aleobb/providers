@@ -81,10 +81,11 @@ python main.py --proveedor edenor --todas --airtable
 En la estructura actual, `Comprobantes` enlaza a `Conceptos` mediante el campo
 `Concepto`. El extractor busca el registro de `Conceptos` cuyo campo `Nombre`
 contenga los términos del proveedor y del banco detectado; requiere una única
-coincidencia y no crea conceptos automáticamente. Los valores comunes se
-guardan en `Fecha Vto.` y `Importe Pesos`; las fechas de tarjeta se guardan en
-`Prox.Vto.`, `Cierre Actual` y `Prox.Cierre`, y el saldo en dólares en
-`Importe USD`.
+coincidencia y no crea conceptos automáticamente. Para desambiguar conceptos,
+también usa el vínculo `Conceptos.Sujeto`; si el documento no identifica al
+titular, selecciona el sujeto `Alejandro`. Los valores comunes se guardan en
+`Fecha Vto.` y `Importe Pesos`; las fechas de tarjeta se guardan en `Prox.Vto.`,
+`Cierre Actual` y `Prox.Cierre`, y el saldo en dólares en `Importe USD`.
 
 El upsert identifica un comprobante por concepto enlazado y vencimiento
 actual. Si hay una sola coincidencia, actualiza; si no hay ninguna, crea; si
@@ -96,6 +97,22 @@ desde el archivo local al campo de adjuntos `Doc.` con la API de carga de
 Airtable; no hace falta publicar el archivo en una URL externa. Al actualizar,
 si el registro ya tiene cualquier adjunto, se omite la carga para no
 reemplazar ni duplicar el documento existente.
+
+También se puede crear o actualizar un comprobante desde un PDF local, sin
+iniciar sesión ni descargarlo del proveedor:
+
+```powershell
+python main.py --airtable-documento "C:\documentos\factura.pdf" --proveedor edenor
+python main.py --airtable-documento "C:\documentos\resumen.pdf"
+python main.py --airtable-documento "C:\documentos\visa.pdf" --proveedor visa --banco BBVA
+```
+
+Los layouts de Visa y Mastercard soportados se detectan automáticamente; para
+otros proveedores se debe indicar `--proveedor`. `--banco` es opcional y
+permite especificar el banco para seleccionar el concepto correcto cuando no
+se puede inferir del documento. El PDF debe tener texto seleccionable (no se
+realiza OCR), y el vencimiento actual debe poder extraerse para identificar
+el comprobante.
 
 ## Uso
 

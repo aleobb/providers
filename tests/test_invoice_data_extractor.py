@@ -210,6 +210,25 @@ def test_account_bank_overrides_layout_bank():
     assert data.bank_name == "Banco de la cuenta"
 
 
+def test_extracts_holder_from_statement_holder_label():
+    data = invoice_data.extract_invoice_data_from_text(
+        "TITULAR DE CUENTA: BEN ALEJANDRO OSVALDO\n"
+        "BEN ALEJANDRO OSVALDO CIERRE ACTUAL: 22 Oct 26",
+        _provider(),
+    )
+
+    assert data.holder_name == "BEN ALEJANDRO OSVALDO"
+
+
+def test_extracts_holder_from_customer_label():
+    data = invoice_data.extract_invoice_data_from_text(
+        "Cliente: María Pérez\nTotal a pagar: $ 10,00",
+        _provider(),
+    )
+
+    assert data.holder_name == "María Pérez"
+
+
 def test_extracts_labelled_mastercard_icbc_data_from_text():
     text = (
         "MASTERCARD INTERNACIONAL\n"

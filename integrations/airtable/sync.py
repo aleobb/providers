@@ -29,8 +29,12 @@ class AirtableConfig:
     base_id: str
     invoices_table: str = "Comprobantes"
     concepts_table: str = "Conceptos"
+    subjects_table: str = "Sujetos"
     concept_name_field: str = "Nombre"
     concept_link_field: str = "Concepto"
+    concept_subject_field: str = "Sujeto"
+    subject_name_field: str = "Indentificacion"
+    default_subject_name: str = "Alejandro"
     invoice_attachment_field: str = "Doc."
     invoice_due_date_field: str = "Fecha Vto."
     invoice_next_due_date_field: str = "Prox.Vto."
@@ -66,11 +70,21 @@ class AirtableConfig:
                 "AIRTABLE_COMPROBANTES_TABLE", "Comprobantes"
             ),
             concepts_table=configured("AIRTABLE_CONCEPTOS_TABLE", "Conceptos"),
+            subjects_table=configured("AIRTABLE_SUJETOS_TABLE", "Sujetos"),
             concept_name_field=configured(
                 "AIRTABLE_CONCEPTO_NOMBRE_FIELD", "Nombre"
             ),
             concept_link_field=configured(
                 "AIRTABLE_CONCEPTO_FIELD", "Concepto"
+            ),
+            concept_subject_field=configured(
+                "AIRTABLE_CONCEPTO_SUJETO_FIELD", "Sujeto"
+            ),
+            subject_name_field=configured(
+                "AIRTABLE_SUJETO_NOMBRE_FIELD", "Indentificacion"
+            ),
+            default_subject_name=configured(
+                "AIRTABLE_SUJETO_PREDETERMINADO", "Alejandro"
             ),
             invoice_attachment_field=configured(
                 "AIRTABLE_DOCUMENTO_FIELD", "Doc."
@@ -114,6 +128,8 @@ class AirtableInvoiceSync:
         self._config = config
         self._invoices = api.table(config.base_id, config.invoices_table)
         self._concepts = api.table(config.base_id, config.concepts_table)
+        self._subjects = api.table(config.base_id, config.subjects_table)
+        self._subject_name_cache: dict[str, str] | None = None
 
     def sync_invoice(
         self, pdf_path: Path, data: InvoiceData
@@ -221,7 +237,12 @@ class AirtableInvoiceSync:
             raise AirtableSyncError(
                 "No se pudo identificar el proveedor para buscar el concepto."
             )
-        records = self._concepts.all(fields=[self._config.concept_name_field])
+        records = self._concepts.all(
+            fields=[
+                self._config.concept_name_field,
+                self._config.concept_subject_field,
+            ]
+        )
         matches = [
             record
             for record in records
@@ -242,13 +263,84 @@ class AirtableInvoiceSync:
                 f"No se encontró un concepto para {detail} en "
                 f"{self._config.concepts_table}."
             )
+
+        subject_linked_matches = [
+            record
+            for record in matches
+            if record.get("fields", {}).get(self._config.concept_subject_field)
+        ]
+        if subject_linked_matches:
+            desired_subject = data.holder_name or self._config.default_subject_name
+            subject_matches = [
+                record
+                for record in subject_linked_matches
+                if any(
+                    _subject_name_matches(
+                        self._subject_name(subject_id),
+                        desired_subject,
+                    )
+                    for subject_id in record["fields"][
+                        self._config.concept_subject_field
+                    ]
+                )
+            ]
+            if not subject_matches:
+                raise AirtableSyncError(
+                    f"No se encontró un concepto para proveedor "
+                    f"'{data.provider_name}', banco "
+                    f"'{data.bank_name or '-'}' y sujeto "
+                    f"'{desired_subject}'."
+                )
+            matches = subject_matches
+
+        exact_matches = [
+            record
+            for record in matches
+            if _meaningful_tokens(
+                str(
+                    record.get("fields", {}).get(
+                        self._config.concept_name_field, ""
+                    )
+                )
+            )
+            == (provider_tokens | bank_tokens)
+        ]
+        if len(exact_matches) == 1:
+            return exact_matches[0]["id"]
+        if exact_matches:
+            matches = exact_matches
         if len(matches) > 1:
             raise AirtableSyncError(
                 f"Hay varios conceptos para proveedor '{data.provider_name}'"
                 + (f" y banco '{data.bank_name}'" if data.bank_name else "")
+                + f" y sujeto '{data.holder_name or self._config.default_subject_name}'"
                 + "; no se creó ni actualizó el comprobante."
             )
         return matches[0]["id"]
+
+    def _subject_name(self, subject_id: str) -> str:
+        if self._subject_name_cache is None:
+            records = self._subjects.all(
+                fields=[self._config.subject_name_field]
+            )
+            self._subject_name_cache = {
+                record["id"]: name.strip()
+                for record in records
+                if isinstance(
+                    name := record.get("fields", {}).get(
+                        self._config.subject_name_field
+                    ),
+                    str,
+                )
+                and name.strip()
+            }
+        name = self._subject_name_cache.get(subject_id)
+        if name is None:
+            raise AirtableSyncError(
+                f"No se encontró el nombre del sujeto {subject_id} en "
+                f"{self._config.subjects_table}."
+            )
+        return name
 
     def _invoice_fields(
         self, data: InvoiceData, concept_id: str
@@ -281,11 +373,37 @@ class AirtableInvoiceSync:
 def _meaningful_tokens(
     value: str, *, ignored: set[str] | None = None
 ) -> set[str]:
+    return set(_normalized_tokens(value)) - (
+        {"prisma", "servicio", "proveedor"} | (ignored or set())
+    )
+
+
+def _normalized_tokens(value: str) -> list[str]:
     normalized = unicodedata.normalize("NFKD", value.casefold())
     normalized = "".join(
         character
         for character in normalized
         if not unicodedata.combining(character)
     )
-    ignored_tokens = {"prisma", "servicio", "proveedor"} | (ignored or set())
-    return set(re.findall(r"[a-z0-9]+", normalized)) - ignored_tokens
+    return re.findall(r"[a-z0-9]+", normalized)
+
+
+def _subject_name_matches(subject_name: str, holder_name: str) -> bool:
+    subject_tokens = _normalized_tokens(subject_name)
+    holder_tokens = _normalized_tokens(holder_name)
+    if not subject_tokens or not holder_tokens:
+        return False
+
+    holder_index = 0
+    for subject_token in subject_tokens:
+        while holder_index < len(holder_tokens):
+            holder_token = holder_tokens[holder_index]
+            holder_index += 1
+            if subject_token == holder_token or (
+                len(subject_token) == 1
+                and holder_token.startswith(subject_token)
+            ):
+                break
+        else:
+            return False
+    return True

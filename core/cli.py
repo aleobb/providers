@@ -10,6 +10,7 @@ from .accounts import Account, select_account
 from .browser import BrowserSession
 from .exceptions import (
     CaptchaError,
+    ConfigurationError,
     InvoiceDownloaderError,
     InvoiceNotFoundError,
     LoginError,
@@ -35,7 +36,14 @@ from integrations.pdf_extractor.csv_export import (
     invoice_data_to_csv_row,
     write_invoice_data_csv,
 )
-from integrations.pdf_extractor.invoice_data import extract_invoice_data
+from integrations.pdf_extractor.invoice_data import (
+    InvoiceData,
+    extract_invoice_data,
+    extract_invoice_data_from_text,
+)
+from integrations.pdf_extractor.card_statement import detect_card_provider
+from integrations.pdf_extractor.extractor import _read_text
+from pdfminer.pdfexceptions import PDFException
 
 
 def parse_args() -> dict:
@@ -53,6 +61,8 @@ def parse_args() -> dict:
         "datos_pdf_csv": None,
         "ingresar": False,
         "airtable": False,
+        "airtable_documento": None,
+        "banco": None,
     }
     i = 0
     while i < len(args):
@@ -76,6 +86,12 @@ def parse_args() -> dict:
             result["ingresar"] = True
         elif args[i] == "--airtable":
             result["airtable"] = True
+        elif args[i] == "--airtable-documento" and i + 1 < len(args):
+            result["airtable_documento"] = args[i + 1]
+            i += 1
+        elif args[i] == "--banco" and i + 1 < len(args):
+            result["banco"] = args[i + 1]
+            i += 1
         elif args[i] == "--gestionar-credenciales":
             result["gestionar_credenciales"] = True
         elif args[i] == "--datos-pdf-csv" and i + 1 < len(args):
@@ -525,6 +541,47 @@ async def login_provider(
         await provider.close()
 
 
+def _extract_document_invoice(
+    pdf_path: Path,
+    provider_name: str | None,
+    bank_name: str | None,
+) -> InvoiceData:
+    if not pdf_path.is_file():
+        raise AirtableSyncError(f"No se encontró el documento: {pdf_path}.")
+    if pdf_path.suffix.lower() != ".pdf":
+        raise AirtableSyncError(
+            f"El documento debe ser un PDF: {pdf_path.name}."
+        )
+    try:
+        text = _read_text(pdf_path, max_pages=None)
+    except (OSError, ValueError, PDFException) as error:
+        raise AirtableSyncError(
+            f"No se pudo leer el PDF {pdf_path}: {error}"
+        ) from error
+    if not text.strip():
+        raise AirtableSyncError(
+            f"El PDF {pdf_path.name} no contiene texto seleccionable; "
+            "el extractor no realiza OCR."
+        )
+
+    selected_provider = provider_name or detect_card_provider(text)
+    if not selected_provider:
+        raise AirtableSyncError(
+            "No se pudo identificar el proveedor en el documento. "
+            "Indicá --proveedor <nombre>."
+        )
+    try:
+        provider = get_provider(selected_provider.lower())
+    except ConfigurationError as error:
+        raise AirtableSyncError(
+            f"No se pudo cargar el proveedor '{selected_provider}': {error}"
+        ) from error
+    data = extract_invoice_data_from_text(
+        text, provider, bank_name=bank_name
+    )
+    return data
+
+
 async def run(
     debug: bool,
     listar: bool,
@@ -538,7 +595,55 @@ async def run(
     datos_pdf_csv: str | None = None,
     ingresar: bool = False,
     airtable: bool = False,
+    airtable_documento: str | None = None,
+    banco: str | None = None,
 ) -> None:
+    if airtable_documento is not None:
+        if (
+            todos_proveedores
+            or listar
+            or todas
+            or cuenta is not None
+            or datos_pdf_csv is not None
+            or ingresar
+            or airtable
+        ):
+            print(
+                "--airtable-documento se usa solo y no se combina con "
+                "--listar, --todas, --cuenta, --todos-proveedores, "
+                "--datos-pdf-csv, --ingresar ni --airtable.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        try:
+            pdf_path = Path(airtable_documento).expanduser()
+            invoice_data = _extract_document_invoice(
+                pdf_path, proveedor, banco
+            )
+            airtable_sync = AirtableInvoiceSync(AirtableConfig.from_env())
+            result = await asyncio.to_thread(
+                airtable_sync.sync_invoice, pdf_path, invoice_data
+            )
+        except (AirtableConfigurationError, AirtableSyncError) as error:
+            print(f"ERROR [Airtable]: {error}", file=sys.stderr)
+            sys.exit(1)
+
+        action = "creado" if result.created else "actualizado"
+        print(
+            f"[Airtable] Comprobante {action}: {result.record_id} "
+            f"(proveedor={invoice_data.provider_name}; "
+            f"banco={invoice_data.bank_name or '-'})"
+        )
+        if result.attachment_uploaded:
+            print("[Airtable] PDF adjuntado en el campo Doc.")
+        else:
+            print("[Airtable] PDF ya adjunto; se omitió duplicarlo.")
+        return
+
+    if banco is not None:
+        print("--banco solo se puede usar junto con --airtable-documento.", file=sys.stderr)
+        sys.exit(2)
+
     if ingresar and (
         todos_proveedores
         or not proveedor
@@ -680,21 +785,33 @@ async def run(
 def main() -> None:
     from dotenv import load_dotenv
 
-    try:
-        credential_store = CredentialStore()
-        imported = credential_store.import_legacy_dotenv_once(
-            Path(__file__).resolve().parents[1] / ".env"
+    args = parse_args()
+    manual_airtable_document = args["airtable_documento"] is not None
+    if manual_airtable_document and args["gestionar_credenciales"]:
+        print(
+            "--airtable-documento no se combina con "
+            "--gestionar-credenciales.",
+            file=sys.stderr,
         )
-    except CredentialStoreError as e:
-        print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(2)
 
-    if imported:
-        print(f"[Credenciales] Se importaron {imported} perfil(es) desde .env.")
+    credential_store = None
+    if not manual_airtable_document:
+        try:
+            credential_store = CredentialStore()
+            imported = credential_store.import_legacy_dotenv_once(
+                Path(__file__).resolve().parents[1] / ".env"
+            )
+        except CredentialStoreError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            sys.exit(2)
+
+        if imported:
+            print(f"[Credenciales] Se importaron {imported} perfil(es) desde .env.")
 
     load_dotenv()
-    args = parse_args()
     if args.pop("gestionar_credenciales"):
+        assert credential_store is not None
         manage_credentials(credential_store)
         return
 

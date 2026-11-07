@@ -17,6 +17,28 @@ from .login import LoginOrchestrator
 class EdesurProvider(Provider):
     name = "edesur"
     display_name = "Edesur"
+    invoice_data_patterns = {
+        "account_identifier": (
+            r"\bcliente\s*(?:n[º°o.]?\s*)?[:#\-]\s*(\d[\d ./\-]*)",
+        ),
+        "amount": (
+            r"total\s+a\s+pagar\s*\([^)]*\)\s*\$?\s*(-?[\d.,]+)",
+        ),
+        "current_due_date": (
+            r"(?:1[º°o.]?\s*(?:er|ro)?\.?\s*vencimiento|"
+            r"primer\s+vencimiento)\s*[:\-]?\s*"
+            r"(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})",
+            r"f\.\s*vto\.\s*cesp\s*[:\-]?\s*"
+            r"(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})",
+        ),
+        "next_due_date": (
+            r"tu\s*pr[oó]xima\s*liquidaci[oó]n\s*vence\s*el\s*"
+            r"(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})",
+        ),
+        "holder_name": (
+            r"^\s*([^\W\d_]+(?:\s+[^\W\d_]+){1,4})\s+Cliente:\s*\d+",
+        ),
+    }
     invoice_date_patterns = (
         r"emisi.n\s+(\d{2})[/\-](\d{2})[/\-](\d{4})",
         r"fecha.+?vencimiento\s*[:\-]?\s*(\d{2})[/\-](\d{2})[/\-](\d{4})",

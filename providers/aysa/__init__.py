@@ -16,6 +16,18 @@ from .login import LoginOrchestrator
 class AysaProvider(Provider):
     name = "aysa"
     display_name = "AySA"
+    invoice_data_patterns = {
+        "account_identifier": (
+            r"cuenta\s*de\s*servicios\s*[:#\-]?\s*(\d[\d ./\-]*)",
+        ),
+        "amount": (
+            r"total\s*a?\s*pagar\s*\$?\s*(-?[\d.,]+)",
+        ),
+        "next_due_date": (
+            r"total\s*a?\s*pagar\s*con\s*recargo\s*hasta\s*el\s*"
+            r"(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})",
+        ),
+    }
     invoice_date_patterns = (
         r"fechadeemisi.n\s*[:\-]?\s*(\d{2})[/\-](\d{2})[/\-](\d{4})",
         r"emisi.n\s*[:\-]?\s*(\d{2})[/\-](\d{2})[/\-](\d{4})",

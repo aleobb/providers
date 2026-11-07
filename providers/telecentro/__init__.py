@@ -17,6 +17,11 @@ class TelecentroProvider(Provider):
     name = "telecentro"
     display_name = "Telecentro"
     can_resume_session = True
+    invoice_data_patterns = {
+        "account_identifier": (
+            r"\bn[º°o.]?\s*de\s*cliente\s*[:#\-]?\s*(\d[\d ./\-]*)",
+        ),
+    }
     invoice_date_patterns = (
         r"vencimiento\s+(\d{2})[/\-](\d{2})[/\-](\d{4})",
         r"fecha.+?vencimiento\s*[:\-]?\s*(\d{2})[/\-](\d{2})[/\-](\d{4})",

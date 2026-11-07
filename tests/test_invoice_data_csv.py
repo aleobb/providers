@@ -21,6 +21,7 @@ def test_card_fields_are_written_to_stable_csv_columns(tmp_path):
         next_closing_date="2026-10-20",
         amount_ars=Decimal("1000.50"),
         amount_usd=Decimal("12.25"),
+        account_identifier="12345678",
     )
     csv_path = tmp_path / "facturas.csv"
 
@@ -35,6 +36,7 @@ def test_card_fields_are_written_to_stable_csv_columns(tmp_path):
             "archivo": "resumen.pdf",
             "proveedor": "Visa (Prisma)",
             "banco": "BBVA",
+            "identificador": "12345678",
             "importe": "1000.50",
             "vencimiento_actual": "2026-09-30",
             "proximo_vencimiento": "2026-11-01",

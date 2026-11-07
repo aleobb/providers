@@ -79,10 +79,9 @@ def _pdf(tmp_path, filename="invoice.pdf"):
     return path
 
 
-def _sync(concept_records=None, invoice_records=None, subject_records=None):
+def _sync(concept_records=None, invoice_records=None):
     invoices = FakeTable(invoice_records)
     concepts = FakeTable(concept_records)
-    subjects = FakeTable(subject_records)
     config = AirtableConfig(token="token", base_id="base")
     sync = AirtableInvoiceSync(
         config,
@@ -90,7 +89,6 @@ def _sync(concept_records=None, invoice_records=None, subject_records=None):
             {
                 "Comprobantes": invoices,
                 "Conceptos": concepts,
-                "Sujetos": subjects,
             }
         ),
     )
@@ -123,70 +121,22 @@ def test_create_invoice_with_concept_and_extracted_fields(tmp_path):
     assert result.attachment_uploaded is True
 
 
-def test_invoice_concept_uses_holder_subject(tmp_path):
-    sync, invoices, _ = _sync(
-        concept_records=[
-            {
-                "id": "rec-ana",
-                "fields": {
-                    "Nombre": "Visa Galicia Ana",
-                    "Sujeto": ["sub-ana"],
-                },
-            },
-            {
-                "id": "rec-alejandro",
-                "fields": {
-                    "Nombre": "Visa Galicia",
-                    "Sujeto": ["sub-alejandro"],
-                },
-            },
-        ],
-        subject_records=[
-            {
-                "id": "sub-ana",
-                "fields": {"Indentificacion": "Ana M."},
-            },
-            {
-                "id": "sub-alejandro",
-                "fields": {"Indentificacion": "Alejandro"},
-            },
-        ],
-    )
-
-    sync.sync_invoice(
-        _pdf(tmp_path),
-        _data(holder_name="BEN ALEJANDRO OSVALDO"),
-    )
-
-    assert invoices.created[0]["Concepto"] == ["rec-alejandro"]
-
-
-def test_subject_initial_matches_full_holder_name(tmp_path):
+def test_invoice_concept_uses_account_identifier_not_holder_name(tmp_path):
     sync, invoices, _ = _sync(
         concept_records=[
             {
                 "id": "rec-ana",
                 "fields": {
                     "Nombre": "Visa Nacion Ana M.",
-                    "Sujeto": ["sub-ana"],
+                    "Identificador": "1234 5678",
                 },
             },
             {
                 "id": "rec-alejandro",
                 "fields": {
                     "Nombre": "Visa Nacion",
-                    "Sujeto": ["sub-alejandro"],
+                    "Identificador": "8765-4321",
                 },
-            },
-        ],
-        subject_records=[
-            {
-                "id": "sub-ana",
-                "fields": {"Indentificacion": "Ana M."},
-            },
-            {
-                "id": "sub-alejandro",
-                "fields": {"Indentificacion": "Alejandro"},
             },
         ],
     )
@@ -197,47 +147,39 @@ def test_subject_initial_matches_full_holder_name(tmp_path):
             provider_name="Visa (Prisma)",
             bank_name="Nación",
             holder_name="CATALANO ANA MARIA",
+            account_identifier="12345678",
         ),
     )
 
     assert invoices.created[0]["Concepto"] == ["rec-ana"]
 
 
-def test_missing_document_holder_defaults_concept_subject_to_alejandro(
+def test_missing_or_unmatched_account_identifier_does_not_guess_concept(
     tmp_path,
 ):
     sync, invoices, _ = _sync(
         concept_records=[
             {
-                "id": "rec-ana",
-                "fields": {
-                    "Nombre": "Visa Galicia Ana",
-                    "Sujeto": ["sub-ana"],
-                },
-            },
-            {
-                "id": "rec-alejandro",
+                "id": "rec-concept",
                 "fields": {
                     "Nombre": "Visa Galicia",
-                    "Sujeto": ["sub-alejandro"],
+                    "Identificador": "12345678",
                 },
-            },
-        ],
-        subject_records=[
-            {
-                "id": "sub-ana",
-                "fields": {"Indentificacion": "Ana M."},
-            },
-            {
-                "id": "sub-alejandro",
-                "fields": {"Indentificacion": "Alejandro"},
-            },
-        ],
+            }
+        ]
     )
 
-    sync.sync_invoice(_pdf(tmp_path), _data(holder_name=None))
+    with pytest.raises(AirtableSyncError, match="No se pudo extraer"):
+        sync.sync_invoice(_pdf(tmp_path), _data(holder_name="Alejandro"))
 
-    assert invoices.created[0]["Concepto"] == ["rec-alejandro"]
+    assert invoices.created == []
+
+    with pytest.raises(AirtableSyncError, match="identificador extraído"):
+        sync.sync_invoice(
+            _pdf(tmp_path), _data(account_identifier="99999999")
+        )
+
+    assert invoices.created == []
 
 
 def test_visa_concept_uses_detected_issuing_bank(tmp_path):
@@ -392,6 +334,18 @@ def test_config_requires_token_and_base_id(monkeypatch):
 
     with pytest.raises(AirtableConfigurationError, match="AIRTABLE_TOKEN"):
         AirtableConfig.from_env()
+
+
+def test_configurable_concept_identifier_field(monkeypatch):
+    monkeypatch.setenv("AIRTABLE_TOKEN", "token")
+    monkeypatch.setenv("AIRTABLE_BASE_ID", "base")
+    monkeypatch.setenv(
+        "AIRTABLE_CONCEPTO_IDENTIFICADOR_FIELD", "Nro de cliente"
+    )
+
+    config = AirtableConfig.from_env()
+
+    assert config.concept_identifier_field == "Nro de cliente"
 
 
 def test_sync_accepts_pathlike_pdf_path(tmp_path):

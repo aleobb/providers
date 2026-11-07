@@ -19,6 +19,24 @@ class EdenorProvider(Provider):
     name = "edenor"
     display_name = "Edenor"
     can_resume_session = True
+    invoice_data_patterns = {
+        "account_identifier": (
+            r"\bcuenta\s*(?:n[º°o.]?\s*)?(?:[:#\-]\s*)?"
+            r"(\d[\d ./\-]*)",
+        ),
+        "amount": (
+            r"total\s*a?\s*pagar\s*\$?\s*(-?[\d.,]+)",
+        ),
+        "current_due_date": (
+            r"hasta\s*el\s*(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})",
+            r"fecha\s*de\s*vencimiento\s*[:\-]?\s*"
+            r"(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})",
+        ),
+        "next_due_date": (
+            r"la\s*pr[oó]xima\s*liquidaci[oó]n\s*vence\s*el\s*"
+            r"(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})",
+        ),
+    }
     invoice_date_patterns = (
         r"emisi.n\s+(\d{2})[/\-](\d{2})[/\-](\d{4})",
         r"fecha.+?vencimiento\s*[:\-]?\s*(\d{2})[/\-](\d{2})[/\-](\d{4})",

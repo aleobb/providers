@@ -23,6 +23,11 @@ class MastercardProvider(Provider):
     name = "mastercard"
     display_name = "Mastercard (Mis Consultas)"
     can_resume_session = True
+    invoice_data_patterns = {
+        "account_identifier": (
+            r"\bcuenta\s+(\d[\d ./\-]*)",
+        ),
+    }
     invoice_date_patterns = (
         r"fecha\s+de\s+cierre\s*[:\-]?\s*(\d{2})[/\-](\d{2})[/\-](\d{4})",
         r"cierre\s*[:\-]\s*(\d{2})[/\-](\d{2})[/\-](\d{4})",

@@ -16,6 +16,14 @@ from .login import LoginOrchestrator
 class ClaroProvider(Provider):
     name = "claro"
     display_name = "Claro"
+    invoice_data_patterns = {
+        "account_identifier": (
+            r"\bcuenta\s*[:#\-]\s*(\d[\d ./\-]*)",
+        ),
+        "current_due_date": (
+            r"\bvence\s*[:\-]\s*(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})",
+        ),
+    }
     invoice_date_patterns = (
         r"emisi.n\s*[:\-]?\s*(\d{2})[/\-](\d{2})[/\-](\d{4})",
         r"fecha\s+factura\s*[:\-]?\s*(\d{2})[/\-](\d{2})[/\-](\d{4})",

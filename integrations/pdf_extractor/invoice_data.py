@@ -29,10 +29,17 @@ class InvoiceData:
     amount_ars: Decimal | None = None
     amount_usd: Decimal | None = None
     holder_name: str | None = None
+    account_identifier: str | None = None
 
 
 _DATE = r"(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})"
 _DEFAULT_PATTERNS: dict[str, tuple[str, ...]] = {
+    "account_identifier": (
+        r"\bcuenta\s+de\s+servicios?\s*[:#\-]?\s*(\d[\d ./\-]*)",
+        r"\b(?:n[uú]mero|nro\.?|n[°º])\s*(?:de\s*)?"
+        r"(?:cliente|cuenta|servicio|socio)\s*[:#\-]?\s*(\d[\d ./\-]*)",
+        r"\bcliente\s+n[°ºo.]?\s*[:#\-]?\s*(\d[\d ./\-]*)",
+    ),
     "amount": (
         r"(?:importe\s+total|total\s+a\s+pagar|monto\s+total|"
         r"importe\s+a\s+pagar|total\s+factura)\s*[:\-]?\s*"
@@ -86,7 +93,13 @@ def extract_invoice_data_from_text(
     """Extract invoice fields from already-read PDF text."""
     patterns = {
         **_DEFAULT_PATTERNS,
-        **provider.invoice_data_patterns,
+        **{
+            field: (
+                *provider_patterns,
+                *_DEFAULT_PATTERNS.get(field, ()),
+            )
+            for field, provider_patterns in provider.invoice_data_patterns.items()
+        },
     }
     card_data: CardStatementData | None = provider.extract_card_statement_data(
         text
@@ -114,7 +127,12 @@ def extract_invoice_data_from_text(
         next_closing_date=card_data.next_closing_date if card_data else None,
         amount_ars=card_data.amount_ars if card_data else None,
         amount_usd=card_data.amount_usd if card_data else None,
-        holder_name=_extract_holder_name(text),
+        holder_name=_extract_holder_name(
+            text, patterns.get("holder_name", ())
+        ),
+        account_identifier=_extract_account_identifier(
+            text, patterns.get("account_identifier", ())
+        ),
     )
 
 
@@ -148,7 +166,7 @@ def _extract_date(text: str, patterns: tuple[str, ...]) -> str | None:
 _HOLDER_NAME_PATTERNS = (
     r"\b(?:titular(?:\s+de\s+(?:la\s+)?(?:cuenta|servicio))?|"
     r"nombre\s+del\s+titular|receptor)\s*[:\-]\s*([^\r\n]+)",
-    r"\bcliente\s*[:\-]\s*([^\r\n]+)",
+    r"(?<!de )\bcliente\s*[:\-]\s*([^\r\n]+)",
 )
 _HOLDER_TRAILING_LABELS = re.compile(
     r"\s+(?:CIERRE\s+ACTUAL|VENCIMIENTO|N[°º]\s*DE\s*CUENTA|"
@@ -157,13 +175,30 @@ _HOLDER_TRAILING_LABELS = re.compile(
 )
 
 
-def _extract_holder_name(text: str) -> str | None:
-    for pattern in _HOLDER_NAME_PATTERNS:
-        match = re.search(pattern, text, re.IGNORECASE)
+def _extract_holder_name(
+    text: str, provider_patterns: tuple[str, ...] = ()
+) -> str | None:
+    for pattern in (*provider_patterns, *_HOLDER_NAME_PATTERNS):
+        match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
         if match is None:
             continue
         holder_name = _HOLDER_TRAILING_LABELS.sub("", match.group(1))
         holder_name = re.sub(r"\s+", " ", holder_name).strip(" \t:;,-")
-        if holder_name:
+        if holder_name and re.search(r"[^\W\d_]", holder_name):
             return holder_name
+    return None
+
+
+def _extract_account_identifier(
+    text: str, patterns: tuple[str, ...]
+) -> str | None:
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
+        if match is None:
+            continue
+        identifier = re.sub(r"\s+", " ", match.group(1)).strip(
+            " \t:;,#./-"
+        )
+        if identifier and any(character.isdigit() for character in identifier):
+            return identifier
     return None

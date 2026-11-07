@@ -25,6 +25,23 @@ class MetrogasProvider(Provider):
     name = "metrogas"
     display_name = "Metrogas"
     can_resume_session = True
+    invoice_data_patterns = {
+        "account_identifier": (
+            r"n[uú]mero\s+de\s+cliente[^\r\n]*"
+            r"(?:\r?\n[^\r\n]*){1,4}\r?\n\s*(\d{9,12})(?!\d)",
+            r"\binterlocutor\s*[:#\-]\s*(\d[\d ./\-]*)",
+        ),
+        "current_due_date": (
+            r"(?m)^\s*(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})\s*"
+            r"\r?\n\s*fecha\s+de\s+vencimiento\s*:",
+            r"fecha\s+de\s+vencimiento\s+cesp\s*[:\-]?\s*"
+            r"(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})",
+        ),
+        "next_due_date": (
+            r"pr[oó]ximo\s+vencimiento\s+estimado\s*[:\-]?\s*"
+            r"(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})",
+        ),
+    }
     invoice_date_patterns = (
         r"fecha\s+de\s+emisi.n\s*[:\-]?\s*(\d{2})[/\-](\d{2})[/\-](\d{4})",
         r"emisi.n\s*[:\-]?\s*(\d{2})[/\-](\d{2})[/\-](\d{4})",

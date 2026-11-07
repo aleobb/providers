@@ -30,6 +30,12 @@ if TYPE_CHECKING:
 class VisaProvider(Provider):
     name = "visa"
     display_name = "Visa (Prisma)"
+    invoice_data_patterns = {
+        "account_identifier": (
+            r"\bN\s*(?:[°º]\s*)?(?:DE\s+)?CUENTA\s*[:#\-]?\s*"
+            r"(\d[\d ./\-]*)",
+        ),
+    }
     credential_fields = (
         CredentialField("documento_nacional_de_identidad", "DNI"),
         CredentialField("usuario", "Usuario"),

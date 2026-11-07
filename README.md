@@ -48,7 +48,7 @@ Claro y Telecentro comparten en `core/network_diagnostics.py` el filtrado de dom
 
 Visa mantiene sus estrategias de descarga, selector de tarjeta, logout y extracción del período en módulos internos separados; `accounts.py` y `login.py` conservan las tareas correspondientes.
 
-Después de descargar una factura, el CLI extrae y muestra el proveedor, el importe, el vencimiento actual y el próximo vencimiento. Las reglas comunes están en `integrations/pdf_extractor/invoice_data.py`; cada proveedor puede sobrescribirlas mediante `invoice_data_patterns`. Para tarjetas también se muestran, cuando se reconoce el formato, el banco, los importes en pesos/dólares y las fechas de cierre actual y próximo. Durante una descarga, el banco de la cuenta seleccionada tiene prioridad; al procesar PDFs en lote se usa el banco que permita identificar el layout. Hay parsers para resúmenes Visa, Visa Nación y Mastercard BBVA/ICBC; el layout ICBC también reconoce el resumen con campos etiquetados (`Estado de cuenta al`, `Saldo actual` y fechas de vencimiento/cierre). No se asume que un layout no reconocido sea Visa. El importe común y las fechas se representan como `Decimal` y `YYYY-MM-DD`, respectivamente.
+Después de descargar una factura, el CLI extrae y muestra el proveedor, el importe, el vencimiento actual y el próximo vencimiento. Las reglas comunes están en `integrations/pdf_extractor/invoice_data.py`; cada proveedor puede agregar patrones prioritarios mediante `invoice_data_patterns`, manteniendo los patrones comunes como alternativa. Hay patrones específicos para los formatos de AySA, Claro, Edenor, Edesur y Metrogas, incluidos rótulos compactos o particulares de vencimientos e importes. En Metrogas se prioriza la fecha de pago que aparece junto a `FECHA DE VENCIMIENTO` sobre la fecha CESP del pie de página. Para tarjetas también se muestran, cuando se reconoce el formato, el banco, los importes en pesos/dólares y las fechas de cierre actual y próximo. Durante una descarga, el banco de la cuenta seleccionada tiene prioridad; al procesar PDFs en lote se usa el banco que permita identificar el layout. Hay parsers para resúmenes Visa, Visa Nación y Mastercard BBVA/ICBC; el layout ICBC también reconoce el resumen con campos etiquetados (`Estado de cuenta al`, `Saldo actual` y fechas de vencimiento/cierre). No se asume que un layout no reconocido sea Visa. El importe común y las fechas se representan como `Decimal` y `YYYY-MM-DD`, respectivamente.
 
 La extracción usa la capa de texto del PDF con `pdfplumber`: no es OCR y no reconoce texto en páginas escaneadas. Durante una descarga se leen las primeras dos páginas; el procesador por lotes lee todo el PDF. Otros formatos pueden aprovechar los patrones comunes o recibir reglas específicas cuando haya PDFs de muestra representativos.
 
@@ -80,11 +80,14 @@ python main.py --proveedor edenor --todas --airtable
 
 En la estructura actual, `Comprobantes` enlaza a `Conceptos` mediante el campo
 `Concepto`. El extractor busca el registro de `Conceptos` cuyo campo `Nombre`
-contenga los términos del proveedor y del banco detectado; requiere una única
-coincidencia y no crea conceptos automáticamente. Para desambiguar conceptos,
-también usa el vínculo `Conceptos.Sujeto`; si el documento no identifica al
-titular, selecciona el sujeto `Alejandro`. Los valores comunes se guardan en
-`Fecha Vto.` y `Importe Pesos`; las fechas de tarjeta se guardan en `Prox.Vto.`,
+contenga los términos del proveedor y del banco detectado. Cuando el concepto
+tiene un identificador configurado, valida el número de
+cliente/cuenta/servicio extraído del PDF contra `Conceptos.Identificador`; si
+hay varios conceptos candidatos, usa ese número para desambiguar. La
+sincronización se detiene si falta el identificador requerido o no coincide.
+No se usa el nombre del titular para elegir el concepto y no se crean
+conceptos automáticamente. Los valores comunes se guardan en `Fecha Vto.` y
+`Importe Pesos`; las fechas de tarjeta se guardan en los campos `Prox.Vto.`,
 `Cierre Actual` y `Prox.Cierre`, y el saldo en dólares en `Importe USD`.
 
 El upsert identifica un comprobante por concepto enlazado y vencimiento

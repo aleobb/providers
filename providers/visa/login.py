@@ -5,6 +5,7 @@ import json
 
 from playwright.async_api import BrowserContext, Page, TimeoutError as PlaywrightTimeout
 
+from core import prompts
 from core.exceptions import LoginError, NavigationError, ServerUnavailableError
 from .config import VisaConfig
 
@@ -388,7 +389,7 @@ class LoginOrchestrator:
         print()
         print("  *** Visa requiere verificacion de identidad (OTP) ***")
         print("  Revisa tu email y pega el codigo de 6 digitos.")
-        otp = input("  Codigo OTP: ").strip()
+        otp = prompts.ask("  Codigo OTP: ", kind="otp").strip()
         if not otp:
             raise LoginError("No se ingreso el codigo OTP de Visa")
 

@@ -140,3 +140,29 @@ Este modo usa las credenciales guardadas y el perfil persistente del proveedor; 
 ## Desarrollo
 
 Las pruebas compartidas estan en `tests/`; las especificas de cada proveedor, en `providers/<proveedor>/tests/`. Los utilitarios de diagnostico manual de Visa tambien estan en `providers/visa/tests/`; interactuan con el portal y no son necesarios para las descargas habituales.
+
+## Interfaz web (Supabase) — opcional
+
+Todo lo anterior sigue funcionando igual. Estas opciones se suman:
+
+```powershell
+# Sincroniza cada comprobante con Supabase (tabla comprobantes + PDF en Storage + datos de Drive)
+python main.py --proveedor edenor --todas --supabase
+
+# Elige el perfil sin preguntar (también sirve en ejecución local)
+python main.py --proveedor edenor --todas --perfil principal
+
+# Sube tus perfiles locales a Supabase (cifrados en Vault); primero con --dry-run
+python tools/exportar_credenciales_supabase.py --dry-run
+python tools/exportar_credenciales_supabase.py
+
+# Agente: toma los pedidos de la interfaz web y ejecuta main.py (PC o VM)
+python agent.py
+```
+
+Requiere `SUPABASE_URL` y `SUPABASE_SERVICE_KEY`. Una ejecución pedida desde la web
+(`--ejecucion-id`) toma las credenciales de Supabase, guarda toda la salida de consola
+(tabla `ejecucion_logs` y archivo completo en el bucket `ejecucion-logs`) y pide los
+códigos OTP/MFA desde la web. El workflow `ejecutar-ejecucion.yml` hace lo mismo en
+GitHub Actions para portales sin 2FA/captcha y necesita los secrets `SUPABASE_URL`,
+`SUPABASE_SERVICE_KEY`, `GOOGLE_DRIVE_FOLDER_ID` y `GOOGLE_SERVICE_ACCOUNT_JSON`.

@@ -12,6 +12,7 @@ from typing import Mapping
 from cryptography.fernet import Fernet, InvalidToken
 from dotenv import dotenv_values
 
+from . import prompts
 from .provider import CredentialField
 
 
@@ -357,11 +358,21 @@ class CredentialStore:
         if len(profiles) == 1:
             return self.get_profile(profiles[0].id)
 
+        preferred = os.environ.get("PROVIDERS_PROFILE_ALIAS", "").strip().lower()
+        if preferred:
+            for profile in profiles:
+                if profile.alias.lower() == preferred:
+                    return self.get_profile(profile.id)
+
         print(f"\nCredenciales guardadas para {provider_details.display_name}:")
         for index, profile in enumerate(profiles, 1):
             print(f"  {index}. {profile.alias}")
         while True:
-            selected = input("Elige un perfil: ").strip()
+            selected = prompts.ask(
+                "Elige un perfil: ",
+                kind="perfil",
+                options=[f"{i}. {p.alias}" for i, p in enumerate(profiles, 1)],
+            ).strip()
             try:
                 profile_index = int(selected) - 1
             except ValueError:

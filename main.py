@@ -30,4 +30,6 @@ Variables opcionales por proveedor:
 from core.cli import main
 
 if __name__ == "__main__":
-    main()
+    from core.managed import run_with_management
+
+    run_with_management(main)

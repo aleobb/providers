@@ -24,7 +24,7 @@ from .credential_store import (
 from .provider import Provider
 from .registry import all_provider_names, all_providers, get_provider
 from .utils import dismiss_popups
-from . import run_log
+from . import hooks, run_log
 from integrations.airtable.sync import (
     AirtableConfigurationError,
     AirtableConfig,
@@ -124,13 +124,13 @@ def _upload_if_enabled(
     path: Path,
     drive_uploader,
     drive_root_id: str,
-) -> None:
+) -> dict | None:
     if not drive_uploader or not drive_root_id:
-        return
+        return None
     banco = account.extra.get("banco", "") if account.extra else ""
     from integrations.google_drive.drive import upload_invoice_to_drive
 
-    upload_invoice_to_drive(
+    return upload_invoice_to_drive(
         drive_uploader, drive_root_id, provider, period, path, banco
     )
 
@@ -187,7 +187,7 @@ async def _record_download_success(
         )
     if invoice_data_rows is not None:
         invoice_data_rows.append(invoice_data_to_csv_row(path, invoice_data))
-    _upload_if_enabled(
+    drive_result = _upload_if_enabled(
         provider, account, period, path, drive_uploader, drive_root_id
     )
     if airtable_sync is not None:
@@ -203,6 +203,14 @@ async def _record_download_success(
             print("  [Airtable] PDF adjuntado en el campo Doc.")
         else:
             print("  [Airtable] PDF ya adjunto; se omitió duplicarlo.")
+    await hooks.run_post_download(
+        provider=provider,
+        account=account,
+        path=path,
+        period=period,
+        invoice_data=invoice_data,
+        drive_result=drive_result,
+    )
 
 
 async def _download_all_accounts(

@@ -1,0 +1,31 @@
+name: Ejecutar ejecución (interfaz web)
+
+# Lo dispara la interfaz web (workflow_dispatch vía API) con el id de una fila
+# de la tabla `ejecuciones`. Solo sirve para portales sin 2FA/captcha.
+# No reemplaza al workflow existente: ambos conviven.
+on:
+  workflow_dispatch:
+    inputs:
+      ejecucion_id:
+        description: "ID de la ejecución en Supabase"
+        required: true
+
+jobs:
+  ejecutar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: playwright install chrome --with-deps
+      - name: Ejecutar
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: python agent.py --ejecucion ${{ inputs.ejecucion_id }}

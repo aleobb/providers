@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from . import prompts
 from .exceptions import InvoiceDownloaderError
 
 
@@ -46,7 +47,11 @@ def select_account(accounts: list[Account], cuenta_arg: str | None) -> Account:
 
     while True:
         try:
-            raw = input(f"Seleccionar cuenta [1-{len(accounts)}]: ").strip()
+            raw = prompts.ask(
+                f"Seleccionar cuenta [1-{len(accounts)}]: ",
+                kind="cuenta",
+                options=[acc.display(i) for i, acc in enumerate(accounts, 1)],
+            ).strip()
             idx = int(raw) - 1
             if 0 <= idx < len(accounts):
                 return accounts[idx]

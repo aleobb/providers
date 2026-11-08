@@ -142,8 +142,10 @@ def upload_invoice_to_drive(
     period: str,
     path: Path,
     banco: str = "",
-) -> None:
-    """Sube una factura a Drive sin interrumpir la descarga si falla la integración."""
+) -> dict | None:
+    """Sube una factura a Drive sin interrumpir la descarga si falla la integración.
+
+    Devuelve {file_id, link, path, name} o None si falló."""
     try:
         target = get_drive_target(provider, period, banco=banco)
         file_id = uploader.upload_to_path(
@@ -154,5 +156,12 @@ def upload_invoice_to_drive(
             print(f"  Drive: {drive_path} ✓")
         else:
             print(f"  Drive: {drive_path} (ya existía)")
+        return {
+            "file_id": file_id,
+            "link": f"https://drive.google.com/file/d/{file_id}/view" if file_id else None,
+            "path": drive_path,
+            "name": target.filename,
+        }
     except Exception as e:
         print(f"  [Drive] Error al subir {path.name}: {e}", file=sys.stderr)
+        return None

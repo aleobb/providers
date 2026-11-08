@@ -5,6 +5,7 @@ import asyncio
 import httpx
 from playwright.async_api import BrowserContext, Page, TimeoutError as PlaywrightTimeout
 
+from core import prompts
 from core.exceptions import LoginError, NavigationError, ServerUnavailableError
 from .config import MastercardConfig
 
@@ -100,7 +101,7 @@ async def do_login(page: Page, context: BrowserContext, config: MastercardConfig
 
     print()
     print("  Mastercard requiere el codigo de tu app Authenticator.")
-    otp = input("  Codigo actual de Authenticator: ").strip()
+    otp = prompts.ask("  Codigo actual de Authenticator: ", kind="mfa").strip()
     if not otp:
         raise LoginError("No se ingreso el codigo de Authenticator de Mastercard")
 

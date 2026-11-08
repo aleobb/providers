@@ -56,3 +56,6 @@ ENV/
 # Windows
 Thumbs.db
 Desktop.ini
+
+# Pruebas manuales
+/*ztest.py

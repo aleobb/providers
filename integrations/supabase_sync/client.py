@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import os
+from dotenv import load_dotenv
 from typing import Any
 from urllib.parse import quote
 
 import httpx
 
+load_dotenv()
 
 class SupabaseConfigurationError(Exception):
     """Falta configurar la conexión a Supabase."""

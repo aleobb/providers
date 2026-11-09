@@ -4,7 +4,22 @@ Aplicacion Python para iniciar sesion en portales de servicios y tarjetas, desca
 
 ## Proveedores
 
-Aysa, Claro, Edenor, Edesur, Mastercard, Metrogas, Telecentro y Visa.
+Aysa, Claro, Edenor, Edesur, Mastercard, Medife, Metrogas, Telecentro y Visa.
+
+### Medife
+
+Agregar un perfil de Medife (email y contraseña) mediante el gestor de credenciales y ejecutar:
+
+```powershell
+python main.py --proveedor medife
+```
+
+Descarga la última factura del cliente activo, con nombre
+`medife_YYYY-MM_cliente_factura.pdf`. El portal ofrece los últimos tres períodos.
+El acceso por email se selecciona automáticamente; si aparece una verificación
+humana, usar `--debug` y resolverla manualmente. `--ingresar` conserva el flujo
+común para acceder al portal. Otros accesos se configuran como perfiles separados;
+no se cambia automáticamente de cliente dentro de un mismo acceso.
 
 ## Configuracion
 

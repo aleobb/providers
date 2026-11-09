@@ -9,3 +9,4 @@ from . import telecentro  # noqa: F401
 from . import claro  # noqa: F401
 from . import visa  # noqa: F401
 from . import mastercard  # noqa: F401
+from . import medife  # noqa: F401

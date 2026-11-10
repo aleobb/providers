@@ -34,6 +34,7 @@ class Provider(ABC):
     can_resume_session: ClassVar[bool] = False
     invoice_date_patterns: ClassVar[tuple[str, ...]] = ()
     invoice_data_patterns: ClassVar[Mapping[str, tuple[str, ...]]] = {}
+    estimated_next_due_date_months: ClassVar[int | None] = None
     credential_fields: ClassVar[tuple[CredentialField, ...]] = (
         CredentialField("email", "Email"),
         CredentialField("password", "Contraseña", secret=True),

@@ -80,6 +80,8 @@ Después de descargar una factura, el CLI extrae y muestra el proveedor, el impo
 
 La extracción usa la capa de texto del PDF con `pdfplumber`: no es OCR y no reconoce texto en páginas escaneadas. Durante una descarga se leen las primeras dos páginas; el procesador por lotes lee todo el PDF. Otros formatos pueden aprovechar los patrones comunes o recibir reglas específicas cuando haya PDFs de muestra representativos.
 
+Algunos proveedores no imprimen el próximo vencimiento. Para esos casos, un proveedor puede declarar `estimated_next_due_date_months` con la periodicidad mensual; el extractor estima esa fecha solo si no encontró una explícita y sí pudo extraer el vencimiento actual. Si el día no existe en el mes de destino, se usa el último día de ese mes. Medifé usa una periodicidad de un mes.
+
 Para guardar en CSV los datos extraídos durante una descarga:
 
 ```powershell

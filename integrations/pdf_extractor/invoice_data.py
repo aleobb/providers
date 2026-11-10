@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import calendar
 import re
 from dataclasses import dataclass
 from datetime import date
@@ -107,17 +108,26 @@ def extract_invoice_data_from_text(
     amount = _extract_amount(text, patterns.get("amount", ()))
     if amount is None and card_data is not None:
         amount = card_data.amount_ars
+    current_due_date = (
+        _extract_date(text, patterns.get("current_due_date", ()))
+        or (card_data.current_due_date if card_data else None)
+    )
+    next_due_date = (
+        _extract_date(text, patterns.get("next_due_date", ()))
+        or (card_data.next_due_date if card_data else None)
+    )
+    estimate_months = getattr(
+        provider, "estimated_next_due_date_months", None
+    )
+    if next_due_date is None and current_due_date and estimate_months is not None:
+        next_due_date = _estimate_next_due_date(
+            current_due_date, estimate_months
+        )
     return InvoiceData(
         provider_name=provider.display_name,
         amount=amount,
-        current_due_date=(
-            _extract_date(text, patterns.get("current_due_date", ()))
-            or (card_data.current_due_date if card_data else None)
-        ),
-        next_due_date=(
-            _extract_date(text, patterns.get("next_due_date", ()))
-            or (card_data.next_due_date if card_data else None)
-        ),
+        current_due_date=current_due_date,
+        next_due_date=next_due_date,
         text_layer_available=bool(text.strip()),
         read_error=read_error,
         bank_name=bank_name or (card_data.bank_name if card_data else None),
@@ -134,6 +144,17 @@ def extract_invoice_data_from_text(
             text, patterns.get("account_identifier", ())
         ),
     )
+
+
+def _estimate_next_due_date(current_due_date: str, months: int) -> str:
+    if months < 1:
+        raise ValueError("estimated_next_due_date_months debe ser positivo.")
+    current = date.fromisoformat(current_due_date)
+    month_index = current.year * 12 + current.month - 1 + months
+    year, month_zero_based = divmod(month_index, 12)
+    month = month_zero_based + 1
+    day = min(current.day, calendar.monthrange(year, month)[1])
+    return date(year, month, day).isoformat()
 
 
 def _extract_amount(text: str, patterns: tuple[str, ...]) -> Decimal | None:

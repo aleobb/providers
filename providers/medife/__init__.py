@@ -15,6 +15,17 @@ from .login import LoginOrchestrator
 class MedifeProvider(Provider):
     name = 'medife'
     display_name = 'Medifé'
+    estimated_next_due_date_months = 1
+    invoice_data_patterns = {
+        "account_identifier": (
+            r"\bnro\.?\s+asociado\s*/\s*empresa\s*:\s*(\d[\d ./\-]*)",
+        ),
+        "current_due_date": (
+            r"\bvencimiento\b[^\r\n]*\r?\n"
+            r"(?:[^\r\n]*\r?\n){0,1}[^\r\n]*\bnro\.?\s*:\s*\d+[^\r\n]*"
+            r"\r?\n\s*(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})",
+        ),
+    }
     credential_fields = (
         CredentialField('tipo_documento', 'Tipo de documento (DNI, CI, LE, LC, PP; vacio = DNI)', required=False),
         CredentialField('documento_nacional_de_identidad', 'Numero de documento'),

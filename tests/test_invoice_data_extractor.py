@@ -16,14 +16,16 @@ from providers.edesur import EdesurProvider
 from providers.edenor import EdenorProvider
 from providers.metrogas import MetrogasProvider
 from providers.mastercard import MastercardProvider
+from providers.medife import MedifeProvider
 from providers.telecentro import TelecentroProvider
 from providers.visa import VisaProvider
 
 
-def _provider(patterns=None):
+def _provider(patterns=None, estimated_next_due_date_months=None):
     return SimpleNamespace(
         display_name="Proveedor de prueba",
         invoice_data_patterns=patterns or {},
+        estimated_next_due_date_months=estimated_next_due_date_months,
         extract_card_statement_data=lambda _text: None,
     )
 
@@ -66,6 +68,21 @@ def test_extracts_us_style_amount_and_plain_current_due_date(
 
     assert data.amount == Decimal("1234.56")
     assert data.current_due_date == "2026-11-05"
+
+
+def test_estimates_next_due_date_by_month_without_overwriting_explicit_date():
+    provider = _provider(estimated_next_due_date_months=1)
+    data = invoice_data.extract_invoice_data_from_text(
+        "Vencimiento actual: 31/01/2026", provider
+    )
+    explicit = invoice_data.extract_invoice_data_from_text(
+        "Vencimiento actual: 31/01/2026\n"
+        "Próximo vencimiento: 15/02/2026",
+        provider,
+    )
+
+    assert data.next_due_date == "2026-02-28"
+    assert explicit.next_due_date == "2026-02-15"
 
 
 def test_provider_patterns_are_prioritized_over_generic_patterns(
@@ -431,6 +448,41 @@ def test_extracts_metrogas_payment_due_date_from_sample_documents():
         assert data.current_due_date == expected_due_date
 
 
+def test_medife_current_due_date_comes_from_vencimiento_block():
+    data = invoice_data.extract_invoice_data_from_text(
+        "VENCIMIENTO\n"
+        "Nro.: 00568754\n"
+        "19/11/2026\n"
+        "F.Vto: 9/11/2026",
+        MedifeProvider(),
+    )
+
+    assert data.current_due_date == "2026-11-19"
+
+
+def test_medife_estimates_next_due_date_from_sample():
+    path = Path(__file__).parents[1] / "facturas" / "samples" / "medife.pdf"
+    if not path.is_file():
+        pytest.skip("PDF de muestra de Medifé no disponible")
+
+    data = invoice_data.extract_invoice_data(path, MedifeProvider())
+
+    assert data.current_due_date == "2026-11-19"
+    assert data.next_due_date == "2026-12-19"
+
+
+def test_medife_account_identifier_uses_associated_member_number():
+    data = invoice_data.extract_invoice_data_from_text(
+        "RAZON SOCIAL / APELLIDOS Y NOMBRES VENCIMIENTO\n"
+        "CATALANO ANA MARIA Nro.: 00568754\n"
+        "Clave de pago Banelco Nro.:0000000568754\n"
+        "Nro. ASOCIADO / EMPRESA: 568754",
+        MedifeProvider(),
+    )
+
+    assert data.account_identifier == "568754"
+
+
 def test_metrogas_account_identifier_prefers_customer_number_to_interlocutor():
     data = invoice_data.extract_invoice_data_from_text(
         "Número de cliente\nCalle Uno 123\nBarrio Centro\n00123456789\n"
@@ -491,6 +543,7 @@ def test_extracts_mastercard_account_identifier():
         ("metrogas2.pdf", MetrogasProvider),
         ("telecentro.pdf", TelecentroProvider),
         ("master_bbva.pdf", MastercardProvider),
+        ("medife.pdf", MedifeProvider),
         ("visa_ana.pdf", VisaProvider),
         ("visa_bbva.pdf", VisaProvider),
         ("visa_nac.pdf", VisaProvider),
@@ -521,6 +574,7 @@ def test_extracts_account_identifier_from_sample_documents(filename, provider):
         ("edesur.pdf", EdesurProvider, "2026-11-05"),
         ("master_bbva.pdf", MastercardProvider, "2026-11-11"),
         ("master_icbc.pdf", MastercardProvider, "2026-07-08"),
+        ("medife.pdf", MedifeProvider, "2026-11-19"),
         ("metrogas.pdf", MetrogasProvider, "2026-10-05"),
         ("metrogas2.pdf", MetrogasProvider, "2026-11-06"),
         ("telecentro.pdf", TelecentroProvider, "2026-10-01"),

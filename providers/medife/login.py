@@ -19,9 +19,11 @@ class LoginOrchestrator:
                 timeout=self.config.timeout_ms,
             )
             if await self.page.locator('#nrodoc').is_visible():
-                await self.page.get_by_text('Email', exact=True).locator('..').get_by_role('button').click()
-            if await self.page.locator('#email').is_visible():
-                await self.page.locator('#email').fill(self.config.email)
+                await self._fill_document_credentials()
+            elif await self.page.locator('#email').is_visible():
+                await self.page.get_by_role('button', name='Ingresar con mi número de documento', exact=True).click()
+                await self._fill_document_credentials()
+            if await self.page.locator('#nrodoc').is_visible():
                 await self.page.locator('#password').fill(self.config.password)
                 await self.page.get_by_role('button', name='Iniciar sesión', exact=True).click()
                 # Una verificación humana, si aparece, se resuelve manualmente en --debug.
@@ -38,3 +40,12 @@ class LoginOrchestrator:
                 'Medife no completo el acceso a facturacion. Verifica las credenciales; '
                 'si solicita una verificacion humana, ejecuta con --debug y completala manualmente.'
             ) from error
+
+    async def _fill_document_credentials(self) -> None:
+        if not self.config.documento_nacional_de_identidad or not self.config.password:
+            raise LoginError(
+                'Completa numero de documento y contraseña en el perfil de Medife '
+                'con --gestionar-credenciales.'
+            )
+        await self.page.locator('#tipodoc').select_option(self.config.tipo_documento)
+        await self.page.locator('#nrodoc').fill(self.config.documento_nacional_de_identidad)

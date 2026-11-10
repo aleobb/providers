@@ -12,10 +12,10 @@ from providers.medife.config import MedifeConfig
 from providers.medife.invoice import InvoiceService, parse_period, validate_pdf_url
 
 
-def test_medife_is_registered_and_uses_standard_credentials():
+def test_medife_is_registered_and_uses_document_credentials():
     import providers
     provider = get_provider('medife')
-    assert [f.name for f in provider.credential_fields] == ['email', 'password']
+    assert [f.name for f in provider.credential_fields] == ['tipo_documento', 'documento_nacional_de_identidad', 'password']
     assert provider.get_config().browser_stealth is False
 
 

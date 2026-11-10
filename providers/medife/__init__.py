@@ -3,7 +3,7 @@ from pathlib import Path
 from playwright.async_api import BrowserContext, Page
 
 from core.accounts import Account
-from core.provider import Provider
+from core.provider import CredentialField, Provider
 from core.registry import register
 from .accounts import fetch_accounts
 from .config import MedifeConfig
@@ -14,6 +14,11 @@ from .login import LoginOrchestrator
 class MedifeProvider(Provider):
     name = 'medife'
     display_name = 'Medifé'
+    credential_fields = (
+        CredentialField('tipo_documento', 'Tipo de documento (DNI, CI, LE, LC, PP; vacio = DNI)', required=False),
+        CredentialField('documento_nacional_de_identidad', 'Numero de documento'),
+        CredentialField('password', 'Contraseña', secret=True),
+    )
 
     def __init__(self):
         self._config = MedifeConfig()

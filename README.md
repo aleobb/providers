@@ -8,7 +8,8 @@ Aysa, Claro, Edenor, Edesur, Mastercard, Medife, Metrogas, Telecentro y Visa.
 
 ### Medife
 
-Agregar un perfil de Medife (email y contraseña) mediante el gestor de credenciales y ejecutar:
+Agregar un perfil de Medife (tipo de documento, número de documento y contraseña)
+mediante el gestor de credenciales y ejecutar:
 
 ```powershell
 python main.py --proveedor medife
@@ -16,8 +17,11 @@ python main.py --proveedor medife
 
 Descarga la última factura del cliente activo, con nombre
 `medife_YYYY-MM_cliente_factura.pdf`. El portal ofrece los últimos tres períodos.
-El acceso por email se selecciona automáticamente; si aparece una verificación
-humana, usar `--debug` y resolverla manualmente. `--ingresar` conserva el flujo
+El acceso usa el formulario de documento. Tipos admitidos: DNI, CI, LE, LC y PP;
+dejar el tipo vacío usa DNI. Si aparece una verificación humana, usar `--debug`
+y resolverla manualmente. Los perfiles anteriores con email deben editarse en
+`--gestionar-credenciales` para completar el número y tipo de documento;
+la contraseña guardada se conserva. `--ingresar` conserva el flujo
 común para acceder al portal. Otros accesos se configuran como perfiles separados;
 no se cambia automáticamente de cliente dentro de un mismo acceso.
 

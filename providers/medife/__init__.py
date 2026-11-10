@@ -7,6 +7,7 @@ from core.provider import CredentialField, Provider
 from core.registry import register
 from .accounts import fetch_accounts
 from .config import MedifeConfig
+from .browser import apply_context_stealth
 from .invoice import InvoiceService
 from .login import LoginOrchestrator
 
@@ -29,6 +30,8 @@ class MedifeProvider(Provider):
         return self._config
 
     async def login(self, page: Page, context: BrowserContext) -> None:
+        if self._config.stealth_enabled:
+            await apply_context_stealth(context)
         await LoginOrchestrator(page, self._config).execute()
 
     async def fetch_accounts(self, page: Page, context: BrowserContext) -> list[Account]:

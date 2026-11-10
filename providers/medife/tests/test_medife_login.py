@@ -115,3 +115,20 @@ def test_existing_medife_schema_migrates_without_changing_other_providers_or_pro
     config.set_credentials({'tipo_documento': ' lc ', 'documento_nacional_de_identidad': '12345678', 'password': 'test-only'})
     assert config.tipo_documento == 'LC'
     assert config.documento_nacional_de_identidad == '12345678'
+
+
+def test_manual_login_keeps_the_existing_prompt_without_filling_credentials(monkeypatch):
+    page, locators, submit = login_page('document')
+    # El usuario completa el acceso mientras el script espera el prompt.
+    locators['input#nrodoc'].is_visible.side_effect = [True, False]
+    answers = []
+    def answer(message, **kwargs):
+        answers.append(kwargs['kind'])
+        return ''
+    monkeypatch.setattr('providers.medife.login.ask', answer)
+    config = MedifeConfig(manual_login=True)
+    asyncio.run(LoginOrchestrator(page, config).execute())
+    assert answers == ['texto']
+    locators['input#nrodoc'].fill.assert_not_awaited()
+    locators['input#password'].fill.assert_not_awaited()
+    submit.click.assert_not_awaited()

@@ -17,8 +17,11 @@ python main.py --proveedor medife
 
 Descarga la última factura del cliente activo, con nombre
 `medife_YYYY-MM_cliente_factura.pdf`. El portal ofrece los últimos tres períodos.
-Medife usa Chrome nativo con su User-Agent real y el argumento
-`--disable-blink-features=AutomationControlled` para reducir la señal de automatización.
+Medife usa Playwright con Chrome nativo y `playwright-stealth` aplicado al contexto
+antes de navegar, compatible con el perfil persistente. Conserva User-Agent,
+plataforma y GPU reales. Instalar las dependencias actualizadas con
+`python -m pip install -r requirements.txt`. Para desactivar este ajuste solo en
+Medife, configurar `MEDIFE_STEALTH_ENABLED=false` en `.env`.
 El perfil persistente conserva la sesión entre ejecuciones; evitar `--nosession`
 si se quiere reutilizarla. Este ajuste no garantiza que el portal deje de pedir
 verificaciones humanas.

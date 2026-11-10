@@ -1,6 +1,9 @@
+import asyncio
+
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeout
 
 from core.exceptions import LoginError
+from core.prompts import ask
 from .config import MedifeConfig
 
 

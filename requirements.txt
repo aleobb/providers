@@ -1,4 +1,5 @@
 playwright==1.44.*
+playwright-stealth==2.0.3
 python-dotenv==1.0.*
 pyairtable>=3.0,<4.0
 httpx==0.27.*

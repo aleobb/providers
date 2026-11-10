@@ -19,7 +19,8 @@ def test_medife_is_registered_and_uses_document_credentials():
     config = provider.get_config()
     assert config.browser_stealth is False
     assert config.browser_user_agent is None
-    assert config.browser_args == ['--disable-blink-features=AutomationControlled']
+    assert config.stealth_enabled is True
+    assert config.browser_args == []
 
 
 def test_account_and_period_from_portal():

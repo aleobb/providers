@@ -18,6 +18,9 @@ class MedifeConfig(BaseProviderConfig):
     entry_url: str = "https://medife.com.ar/portal/"
     invoices_url: str = "https://medife.com.ar/portal/facturaciones?tab=consulta"
     manual_login: bool = False
+    # El wrapper común no cubre launch_persistent_context. Se aplica al contexto
+    # desde MedifeProvider.login, antes de la primera navegación.
+    stealth_enabled: bool = True
     browser_stealth: bool = False
     browser_user_agent: str | None = None
     browser_args: list[str] = Field(default_factory=list)

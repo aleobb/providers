@@ -14,17 +14,17 @@ class LoginOrchestrator:
         await self.page.goto(self.config.invoices_url, timeout=self.config.timeout_ms)
         try:
             await self.page.wait_for_function(
-                """() => !!document.querySelector('#email, #nrodoc') ||
+                """() => !!document.querySelector('input#email, input#nrodoc') ||
                 /Estado de cuenta:\\s*Nro de cliente/i.test(document.body.innerText)""",
                 timeout=self.config.timeout_ms,
             )
-            if await self.page.locator('#nrodoc').is_visible():
+            if await self.page.locator('input#nrodoc').is_visible():
                 await self._fill_document_credentials()
-            elif await self.page.locator('#email').is_visible():
+            elif await self.page.locator('input#email').is_visible():
                 await self.page.get_by_role('button', name='Ingresar con mi número de documento', exact=True).click()
                 await self._fill_document_credentials()
-            if await self.page.locator('#nrodoc').is_visible():
-                await self.page.locator('#password').fill(self.config.password)
+            if await self.page.locator('input#nrodoc').is_visible():
+                await self.page.locator('input#password').fill(self.config.password)
                 await self.page.get_by_role('button', name='Iniciar sesión', exact=True).click()
                 # Una verificación humana, si aparece, se resuelve manualmente en --debug.
                 await self.page.wait_for_url(
@@ -47,5 +47,5 @@ class LoginOrchestrator:
                 'Completa numero de documento y contraseña en el perfil de Medife '
                 'con --gestionar-credenciales.'
             )
-        await self.page.locator('#tipodoc').select_option(self.config.tipo_documento)
-        await self.page.locator('#nrodoc').fill(self.config.documento_nacional_de_identidad)
+        await self.page.locator('select#tipodoc').select_option(self.config.tipo_documento)
+        await self.page.locator('input#nrodoc').fill(self.config.documento_nacional_de_identidad)

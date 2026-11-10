@@ -16,13 +16,13 @@ def login_page(mode):
     page = MagicMock()
     state = {'mode': mode}
     locators = {}
-    for selector in ('#email', '#nrodoc', '#tipodoc', '#password'):
+    for selector in ('input#email', 'input#nrodoc', 'select#tipodoc', 'input#password'):
         locator = MagicMock()
         locator.fill = AsyncMock()
         locator.select_option = AsyncMock()
         locator.is_visible = AsyncMock(side_effect=lambda s=selector: (
-            (s == '#nrodoc' and state['mode'] == 'document')
-            or (s == '#email' and state['mode'] == 'email')
+            (s == 'input#nrodoc' and state['mode'] == 'document')
+            or (s == 'input#email' and state['mode'] == 'email')
         ))
         locators[selector] = locator
     page.locator.side_effect = locators.__getitem__
@@ -48,10 +48,10 @@ def test_login_uses_document_form_including_return_from_email(mode, kind):
     page, locators, submit = login_page(mode)
     config = MedifeConfig(tipo_documento=kind, documento_nacional_de_identidad='12345678', password='test-only')
     asyncio.run(LoginOrchestrator(page, config).execute())
-    locators['#tipodoc'].select_option.assert_awaited_once_with(kind or 'DNI')
-    locators['#nrodoc'].fill.assert_awaited_once_with('12345678')
-    locators['#password'].fill.assert_awaited_once_with('test-only')
-    locators['#email'].fill.assert_not_awaited()
+    locators['select#tipodoc'].select_option.assert_awaited_once_with(kind or 'DNI')
+    locators['input#nrodoc'].fill.assert_awaited_once_with('12345678')
+    locators['input#password'].fill.assert_awaited_once_with('test-only')
+    locators['input#email'].fill.assert_not_awaited()
     submit.click.assert_awaited_once()
     assert page.goto.await_args_list[-1].args[0] == config.invoices_url
 
@@ -60,7 +60,7 @@ def test_active_session_does_not_submit_credentials():
     page, locators, submit = login_page('active')
     asyncio.run(LoginOrchestrator(page, MedifeConfig()).execute())
     submit.click.assert_not_awaited()
-    locators['#password'].fill.assert_not_awaited()
+    locators['input#password'].fill.assert_not_awaited()
 
 
 def test_old_email_only_profile_fails_before_submit():
@@ -70,7 +70,7 @@ def test_old_email_only_profile_fails_before_submit():
     with pytest.raises(LoginError, match='gestionar-credenciales'):
         asyncio.run(LoginOrchestrator(page, config).execute())
     submit.click.assert_not_awaited()
-    locators['#password'].fill.assert_not_awaited()
+    locators['input#password'].fill.assert_not_awaited()
 
 
 def test_unsupported_document_type_fails_before_sending_number():
@@ -78,7 +78,7 @@ def test_unsupported_document_type_fails_before_sending_number():
     config = MedifeConfig(tipo_documento='invalid', documento_nacional_de_identidad='12345678', password='test-only')
     with pytest.raises(ConfigurationError, match='Tipo de documento'):
         asyncio.run(LoginOrchestrator(page, config).execute())
-    locators['#nrodoc'].fill.assert_not_awaited()
+    locators['input#nrodoc'].fill.assert_not_awaited()
     submit.click.assert_not_awaited()
 
 

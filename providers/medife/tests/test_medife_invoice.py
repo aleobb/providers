@@ -16,7 +16,10 @@ def test_medife_is_registered_and_uses_document_credentials():
     import providers
     provider = get_provider('medife')
     assert [f.name for f in provider.credential_fields] == ['tipo_documento', 'documento_nacional_de_identidad', 'password']
-    assert provider.get_config().browser_stealth is False
+    config = provider.get_config()
+    assert config.browser_stealth is False
+    assert config.browser_user_agent is None
+    assert config.browser_args == ['--disable-blink-features=AutomationControlled']
 
 
 def test_account_and_period_from_portal():

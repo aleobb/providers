@@ -17,6 +17,12 @@ python main.py --proveedor medife
 
 Descarga la última factura del cliente activo, con nombre
 `medife_YYYY-MM_cliente_factura.pdf`. El portal ofrece los últimos tres períodos.
+Medife usa Chrome nativo con su User-Agent real y el argumento
+`--disable-blink-features=AutomationControlled` para reducir la señal de automatización.
+El perfil persistente conserva la sesión entre ejecuciones; evitar `--nosession`
+si se quiere reutilizarla. Este ajuste no garantiza que el portal deje de pedir
+verificaciones humanas.
+
 El acceso usa el formulario de documento. Tipos admitidos: DNI, CI, LE, LC y PP;
 dejar el tipo vacío usa DNI. Si aparece una verificación humana, usar `--debug`
 y resolverla manualmente. Los perfiles anteriores con email deben editarse en

@@ -17,12 +17,10 @@ class MedifeConfig(BaseProviderConfig):
 
     entry_url: str = "https://medife.com.ar/portal/"
     invoices_url: str = "https://medife.com.ar/portal/facturaciones?tab=consulta"
+    manual_login: bool = False
     browser_stealth: bool = False
     browser_user_agent: str | None = None
-    browser_args: list[str] = Field(
-        default_factory=lambda: ['--disable-blink-features=AutomationControlled'],
-        description='Reducir la señal Blink de automatización solo para Medife',
-    )
+    browser_args: list[str] = Field(default_factory=list)
 
     @property
     def tipo_documento(self) -> str:

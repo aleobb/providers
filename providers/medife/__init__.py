@@ -22,6 +22,8 @@ class MedifeProvider(Provider):
 
     def __init__(self):
         self._config = MedifeConfig()
+        if self._config.manual_login:
+            self._config.headless = False
 
     def get_config(self) -> MedifeConfig:
         return self._config

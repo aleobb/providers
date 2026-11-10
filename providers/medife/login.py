@@ -18,7 +18,23 @@ class LoginOrchestrator:
                 /Estado de cuenta:\\s*Nro de cliente/i.test(document.body.innerText)""",
                 timeout=self.config.timeout_ms,
             )
-            if await self.page.locator('input#nrodoc').is_visible():
+            login_form_visible = (
+                await self.page.locator('input#nrodoc').is_visible()
+                or await self.page.locator('input#email').is_visible()
+            )
+            if self.config.manual_login and login_form_visible:
+                await asyncio.to_thread(
+                    ask,
+                    'Inicia sesión manualmente en la ventana de Medifé. '
+                    'Cuando veas el portal autenticado, presiona Enter para continuar: ',
+                    kind='texto',
+                )
+                await self.page.wait_for_function(
+                    r"/Estado de cuenta:\s*Nro de cliente/i.test(document.body.innerText)",
+                    timeout=self.config.timeout_ms,
+                )
+                await self.page.goto(self.config.invoices_url, timeout=self.config.timeout_ms)
+            elif await self.page.locator('input#nrodoc').is_visible():
                 await self._fill_document_credentials()
             elif await self.page.locator('input#email').is_visible():
                 await self.page.get_by_role('button', name='Ingresar con mi número de documento', exact=True).click()

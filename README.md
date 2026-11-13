@@ -196,3 +196,7 @@ Requiere `SUPABASE_URL` y `SUPABASE_SERVICE_KEY`. Una ejecución pedida desde la
 códigos OTP/MFA desde la web. El workflow `ejecutar-ejecucion.yml` hace lo mismo en
 GitHub Actions para portales sin 2FA/captcha y necesita los secrets `SUPABASE_URL`,
 `SUPABASE_SERVICE_KEY`, `GOOGLE_DRIVE_FOLDER_ID` y `GOOGLE_SERVICE_ACCOUNT_JSON`.
+
+
+## Despliegue del agente en VM (Oracle Cloud)
+Ver `deploy/oracle/README.md` (instalador, escritorio remoto noVNC y servicio systemd). `PROVIDERS_BROWSER_CHANNEL=chromium` usa Chromium de Playwright (ARM); por defecto sigue usando Chrome.

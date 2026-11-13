@@ -1,0 +1,14 @@
+[Unit]
+Description=Escritorio virtual (VNC :1) para ver el navegador de providers
+After=network.target
+
+[Service]
+Type=forking
+User=__USER__
+ExecStartPre=-/usr/bin/vncserver -kill :1
+ExecStart=/usr/bin/vncserver :1 -localhost yes -geometry 1366x768 -depth 24
+ExecStop=/usr/bin/vncserver -kill :1
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

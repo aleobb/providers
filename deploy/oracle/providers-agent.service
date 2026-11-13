@@ -1,0 +1,15 @@
+[Unit]
+Description=Agente de ejecuciones de providers
+After=network-online.target vnc.service
+Wants=network-online.target
+
+[Service]
+User=__USER__
+WorkingDirectory=__DIR__
+EnvironmentFile=__ENV__
+ExecStart=__DIR__/.venv/bin/python agent.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

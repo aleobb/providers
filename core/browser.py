@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -78,11 +79,15 @@ class BrowserSession:
         launch_options = {
             "user_data_dir": str(profile_dir),
             "headless": self.config.headless,
-            "channel": "chrome",
             "viewport": {"width": 1280, "height": 800},
             "locale": "es-AR",
             "timezone_id": "America/Argentina/Buenos_Aires",
         }
+        # Por defecto Google Chrome; PROVIDERS_BROWSER_CHANNEL=chromium usa el Chromium
+        # de Playwright (necesario en VM ARM, donde Chrome no existe).
+        channel = os.environ.get("PROVIDERS_BROWSER_CHANNEL", "chrome").strip()
+        if channel and channel != "chromium":
+            launch_options["channel"] = channel
         if self.config.browser_user_agent:
             launch_options["user_agent"] = self.config.browser_user_agent
 

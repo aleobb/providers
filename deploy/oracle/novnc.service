@@ -1,0 +1,12 @@
+[Unit]
+Description=noVNC (escritorio en el navegador, solo localhost:6080)
+After=vnc.service
+Requires=vnc.service
+
+[Service]
+User=__USER__
+ExecStart=/usr/bin/websockify --web=/usr/share/novnc 127.0.0.1:6080 127.0.0.1:5901
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

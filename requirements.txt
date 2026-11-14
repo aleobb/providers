@@ -1,4 +1,4 @@
-playwright==1.44.*
+playwright>=1.48,<2
 playwright-stealth==2.0.3
 python-dotenv==1.0.*
 pyairtable>=3.0,<4.0

@@ -1,4 +1,5 @@
 name: Ejecutar ejecución (interfaz web)
+run-name: "Ejecución ${{ inputs.ejecucion_id }}"
 
 # Lo dispara la interfaz web (workflow_dispatch vía API) con el id de una fila
 # de la tabla `ejecuciones`. Solo sirve para portales sin 2FA/captcha.
@@ -15,8 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip

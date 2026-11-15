@@ -29,6 +29,7 @@ if [ ! -f "$ENV_FILE" ]; then
   cat > "$ENV_FILE" <<ENV
 SUPABASE_URL=
 SUPABASE_SERVICE_KEY=
+PROVIDERS_CREDENTIALS_KEY=
 AGENT_NAME=oracle-vm
 DISPLAY=:1
 PROVIDERS_BROWSER_CHANNEL=$CHANNEL
@@ -36,7 +37,7 @@ GOOGLE_DRIVE_FOLDER_ID=
 GOOGLE_SERVICE_ACCOUNT_JSON=
 ENV
   chmod 600 "$ENV_FILE"
-  echo ">> Completá $ENV_FILE (SUPABASE_URL, SUPABASE_SERVICE_KEY, Google) y volvé a correr este script."
+  echo ">> Completá $ENV_FILE (SUPABASE_URL, SUPABASE_SERVICE_KEY, PROVIDERS_CREDENTIALS_KEY, Google) y volvé a correr este script."
 fi
 
 # Contraseña de VNC (se pide una vez)

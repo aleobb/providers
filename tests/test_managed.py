@@ -71,3 +71,58 @@ def test_build_argv():
     assert "--todos-proveedores" in debug and "--debug" in debug
     with pytest.raises(ValueError):
         agent.build_argv({"id": 5, "accion": "ingresar", "args": {}, "proveedor_portales": None})
+
+
+class _FakeClient:
+    def __init__(self, profiles):
+        self.profiles = profiles
+
+    def select(self, table, params=None):
+        assert table == "portal_perfiles"
+        assert "credenciales_enc" in params["select"]
+        return self.profiles
+
+
+def _perfil(fernet, creds, alias="Ale", codigo="edenor"):
+    import json
+
+    token = fernet.encrypt(json.dumps(creds).encode()).decode() if creds else None
+    return {
+        "id": 3,
+        "alias": alias,
+        "credenciales_enc": token,
+        "proveedor_portales": {"codigo": codigo, "activo": True, "config": {}},
+    }
+
+
+def test_prepare_environment_descifra_credenciales_fernet(monkeypatch):
+    from cryptography.fernet import Fernet
+
+    real = Fernet.generate_key()
+    monkeypatch.setenv("PROVIDERS_CREDENTIALS_KEY", real.decode())
+    creds = {"email": "a@b.com", "password": "secreto"}
+    run = managed.ManagedRun(_FakeClient([_perfil(Fernet(real), creds)]), 1)
+    run._prepare_environment({"perfil_id": 3})
+    store = CredentialStore()
+    summary = store.list_profiles("edenor")[0]
+    assert store.get_profile(summary.id).credentials == creds
+
+
+def test_prepare_environment_sin_clave_falla(monkeypatch):
+    monkeypatch.delenv("PROVIDERS_CREDENTIALS_KEY", raising=False)
+    run = managed.ManagedRun(_FakeClient([]), 1)
+    with pytest.raises(RuntimeError, match="PROVIDERS_CREDENTIALS_KEY"):
+        run._prepare_environment({"perfil_id": 3})
+
+
+def test_prepare_environment_clave_incorrecta_no_carga(monkeypatch, capsys):
+    from cryptography.fernet import Fernet
+
+    otra = Fernet(Fernet.generate_key())
+    monkeypatch.setenv("PROVIDERS_CREDENTIALS_KEY", Fernet.generate_key().decode())
+    creds = {"email": "a@b.com", "password": "secreto"}
+    run = managed.ManagedRun(_FakeClient([_perfil(otra, creds)]), 1)
+    run._prepare_environment({"perfil_id": 3})
+    err = capsys.readouterr().err
+    assert "No se pudieron descifrar" in err and "secreto" not in err
+    assert CredentialStore().list_profiles("edenor") == []

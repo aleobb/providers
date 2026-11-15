@@ -60,6 +60,7 @@ Script Python para loguearse en portales web de proveedores de servicios (con us
 - **ServerUnavailableError** (`core/exceptions.py`): excepcion para errores transitorios de servidor → se loguea y continua con el siguiente proveedor
 - **Run Log** (`core/run_log.py`): log persistente append-only en `./ejecucion.log` con estado de cada descarga (OK/ERROR/SERVER_DOWN)
 - **Credenciales** (`core/credential_store.py`): perfiles múltiples por proveedor en SQLite; se cifran con Fernet usando `PROVIDERS_CREDENTIALS_KEY`, fuera de la base. `--gestionar-credenciales` administra perfiles y la migración desde `.env` se ejecuta una sola vez.
+- **Credenciales en Supabase** (desde 2026-11-15): `portal_perfiles.credenciales_enc` guarda un token Fernet con un JSON `{campo: valor}` por perfil (los campos de cada portal se definen en `proveedor_portales.campos_login`); la clave `PROVIDERS_CREDENTIALS_KEY` vive en la VM, en Cloudflare (Worker finanzas) y en GitHub Secrets, nunca en la base. `core/managed.py` descifra en el momento de ejecutar; `tools/exportar_credenciales_supabase.py` cifra y sube los perfiles locales. Reemplaza al esquema anterior con Vault (`secret_id`, RPC `get/set_perfil_credenciales`).
 - **Integraciones auxiliares** (`integrations/`): Gmail, Google Drive y extracción PDF en subpaquetes separados del núcleo de descarga.
 
 ### Decisiones Tecnicas Clave

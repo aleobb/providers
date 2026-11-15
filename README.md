@@ -182,7 +182,7 @@ python main.py --proveedor edenor --todas --supabase
 # Elige el perfil sin preguntar (también sirve en ejecución local)
 python main.py --proveedor edenor --todas --perfil principal
 
-# Sube tus perfiles locales a Supabase (cifrados en Vault); primero con --dry-run
+# Sube tus perfiles locales a Supabase (cifrados con Fernet); primero con --dry-run
 python tools/exportar_credenciales_supabase.py --dry-run
 python tools/exportar_credenciales_supabase.py
 
@@ -190,12 +190,14 @@ python tools/exportar_credenciales_supabase.py
 python agent.py
 ```
 
-Requiere `SUPABASE_URL` y `SUPABASE_SERVICE_KEY`. Una ejecución pedida desde la web
+Requiere `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` y `PROVIDERS_CREDENTIALS_KEY` (la misma clave Fernet
+en PC, VM, Cloudflare y GitHub Actions: los logins se guardan cifrados en `portal_perfiles.credenciales_enc`
+y solo se descifran en quien tiene la clave). Una ejecución pedida desde la web
 (`--ejecucion-id`) toma las credenciales de Supabase, guarda toda la salida de consola
 (tabla `ejecucion_logs` y archivo completo en el bucket `ejecucion-logs`) y pide los
 códigos OTP/MFA desde la web. El workflow `ejecutar-ejecucion.yml` hace lo mismo en
 GitHub Actions para portales sin 2FA/captcha y necesita los secrets `SUPABASE_URL`,
-`SUPABASE_SERVICE_KEY`, `GOOGLE_DRIVE_FOLDER_ID` y `GOOGLE_SERVICE_ACCOUNT_JSON`.
+`SUPABASE_SERVICE_KEY`, `PROVIDERS_CREDENTIALS_KEY`, `GOOGLE_DRIVE_FOLDER_ID` y `GOOGLE_SERVICE_ACCOUNT_JSON`.
 
 
 ## Despliegue del agente en VM (Oracle Cloud)

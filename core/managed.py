@@ -245,9 +245,24 @@ class ManagedRun:
     # ------------------------------------------------------------ entorno
     def _prepare_environment(self, row: dict) -> None:
         """Credenciales desde Supabase en un almacén temporal + config del portal."""
-        from cryptography.fernet import Fernet
+        import json
+
+        from cryptography.fernet import Fernet, InvalidToken
 
         from .credential_store import CredentialStore, CredentialStoreError
+
+        # Clave real (Cloudflare/VM/GitHub secret): se lee ANTES de reemplazarla
+        # por la clave efímera del almacén temporal.
+        real_key = os.environ.get("PROVIDERS_CREDENTIALS_KEY", "").strip()
+        if not real_key:
+            raise RuntimeError(
+                "Falta PROVIDERS_CREDENTIALS_KEY: es necesaria para descifrar "
+                "las credenciales guardadas en Supabase."
+            )
+        try:
+            vault = Fernet(real_key.encode())
+        except ValueError as error:
+            raise RuntimeError("PROVIDERS_CREDENTIALS_KEY no es una clave Fernet válida.") from error
 
         if row.get("perfil_id"):
             filters = {"id": f"eq.{row['perfil_id']}"}
@@ -259,7 +274,7 @@ class ManagedRun:
             "portal_perfiles",
             {
                 **filters,
-                "select": "id,alias,proveedor_portales(codigo,activo,config)",
+                "select": "id,alias,credenciales_enc,proveedor_portales(codigo,activo,config)",
                 "order": "id",
             },
         )
@@ -280,9 +295,18 @@ class ManagedRun:
             portal = profile.get("proveedor_portales") or {}
             for key, value in (portal.get("config") or {}).items():
                 os.environ.setdefault(str(key), str(value))
-            credentials = self.client.rpc(
-                "get_perfil_credenciales", {"p_perfil_id": profile["id"]}
-            )
+            credentials = None
+            if profile.get("credenciales_enc"):
+                try:
+                    credentials = json.loads(vault.decrypt(profile["credenciales_enc"].encode()))
+                except (InvalidToken, ValueError):
+                    print(
+                        f"[Credenciales] No se pudieron descifrar las credenciales del perfil "
+                        f"«{profile['alias']}» de {portal.get('codigo')}: revisá que "
+                        "PROVIDERS_CREDENTIALS_KEY sea la clave correcta.",
+                        file=sys.stderr,
+                    )
+                    continue
             if not credentials:
                 print(
                     f"[Credenciales] El perfil «{profile['alias']}» de "

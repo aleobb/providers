@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Copia tus perfiles de credenciales locales (SQLite) a Supabase, cifrados en Vault.
+"""Copia tus perfiles de credenciales locales (SQLite) a Supabase, cifrados con Fernet
+(portal_perfiles.credenciales_enc; la clave PROVIDERS_CREDENTIALS_KEY no se sube).
 
 Uso (en tu PC, donde está tu SQLite y PROVIDERS_CREDENTIALS_KEY):
     python tools/exportar_credenciales_supabase.py --dry-run   # solo muestra qué haría
@@ -10,12 +11,14 @@ Es repetible: un perfil que ya existe en Supabase se actualiza.
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from cryptography.fernet import Fernet  # noqa: E402
 from dotenv import load_dotenv  # noqa: E402
 
 from core.credential_store import CredentialStore, CredentialStoreError  # noqa: E402
@@ -35,7 +38,8 @@ def main() -> int:
     try:
         store = CredentialStore()
         client = SupabaseClient()
-    except (CredentialStoreError, SupabaseConfigurationError) as error:
+        fernet = Fernet(os.environ["PROVIDERS_CREDENTIALS_KEY"].encode())
+    except (CredentialStoreError, SupabaseConfigurationError, KeyError, ValueError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 2
 
@@ -73,7 +77,8 @@ def main() -> int:
             profile_id = existing["id"] if existing else client.insert_one(
                 "portal_perfiles", {"portal_id": portal["id"], "alias": profile.alias}
             )["id"]
-            client.rpc("set_perfil_credenciales", {"p_perfil_id": profile_id, "p_creds": profile.credentials})
+            token = fernet.encrypt(json.dumps(profile.credentials, ensure_ascii=False).encode()).decode()
+            client.update("portal_perfiles", {"id": f"eq.{profile_id}"}, {"credenciales_enc": token})
             print(f"    · {profile.alias}: {'actualizado' if existing else 'creado'}")
             total += 1
     print(f"\n{'Simulación terminada' if dry_run else f'{total} perfil(es) subido(s) a Supabase'}.")

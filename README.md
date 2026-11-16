@@ -201,4 +201,4 @@ GitHub Actions para portales sin 2FA/captcha y necesita los secrets `SUPABASE_UR
 
 
 ## Despliegue del agente en VM (Oracle Cloud)
-Ver `deploy/oracle/README.md` (instalador, escritorio remoto noVNC y servicio systemd). `PROVIDERS_BROWSER_CHANNEL=chromium` usa Chromium de Playwright (ARM); por defecto sigue usando Chrome.
+Ver `deploy/oracle/README.md` (instalador, escritorio remoto noVNC, Cloudflare Tunnel opcional y servicio systemd). `PROVIDERS_BROWSER_CHANNEL=chromium` usa Chromium de Playwright (ARM); por defecto sigue usando Chrome.

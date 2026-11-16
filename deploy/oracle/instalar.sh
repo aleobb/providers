@@ -58,3 +58,4 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now vnc novnc providers-agent
 echo ">> Listo. Estado: systemctl status providers-agent | Logs: journalctl -u providers-agent -f"
 echo ">> Escritorio: túnel SSH  ssh -L 6080:localhost:6080 $USER@<ip-vm>  y abrí http://localhost:6080/vnc.html"
+echo ">> Opcional: escritorio por Cloudflare Tunnel (requiere dominio en Cloudflare): bash deploy/oracle/instalar-tunnel.sh"

@@ -35,9 +35,11 @@ activa `linger`, instala el lanzador `providers-browser` y la entrada de menú *
 lo fija como navegador predeterminado (xdg, XFCE y `sensible-browser`), agrega `PROVIDERS_PROFILE_FALLBACK=1`
 al env del agente, corrige `After=` de la unidad (KasmVNC) y comprueba que `DISPLAY` exista.
 
-- Perfiles en `.chrome_profile/<perfil>`; el agente usa el de cada proveedor (persisten entre ejecuciones).
-  `providers-browser` abre `escritorio`; `providers-browser telecentro` abre el perfil de Telecentro para
-  iniciar sesión a mano (MFA/CAPTCHA) y que el agente lo reutilice. Un perfil no se puede abrir dos veces:
+- Perfiles en `.chrome_profile/<perfil>`; el agente usa uno por portal/perfil con nombre `<alias>-<id>-<hash>`
+  (p. ej. `telecentro-1-f95a514dbb61`; listalos con `ls ~/providers/.chrome_profile`) y persisten entre ejecuciones.
+  `providers-browser` abre `escritorio`; `providers-browser <nombre-exacto-del-directorio>` abre ese perfil del agente
+  para iniciar sesión a mano (MFA/CAPTCHA). Un nombre que no existe crea un perfil vacío que el agente no usa;
+  lo más simple para iniciar sesión es «Ingresar al portal» en `/proveedores`. Un perfil no se puede abrir dos veces:
   si el agente lo usa, el lanzador avisa; si el navegador del escritorio lo tiene abierto, el agente
   falla con un mensaje claro en lugar de un error de Playwright.
 - `PROVIDERS_PROFILE_FALLBACK=1`: si falta el clon de perfil de Chrome de Telecentro (`telecentro_default_clone`),

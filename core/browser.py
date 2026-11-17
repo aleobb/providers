@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import platform
 import sys
 import tempfile
 from pathlib import Path
@@ -13,6 +14,40 @@ from .config import BaseProviderConfig
 # lo que permite ejecuciones paralelas sin conflictos de lock de Chrome.
 # Gitignoreado. La primera vez puede pedir CAPTCHA; las siguientes lo saltea.
 _PROFILES_BASE = Path(__file__).parent.parent / ".chrome_profile"
+
+
+def browser_channel() -> str | None:
+    """Canal de Chromium para todo el proyecto (None = Chromium de Playwright).
+
+    PROVIDERS_BROWSER_CHANNEL manda; si no está definida, Chrome salvo en Linux ARM
+    (VM de Oracle), donde Chrome no existe y se usa el Chromium de Playwright.
+    """
+    value = os.environ.get("PROVIDERS_BROWSER_CHANNEL", "").strip().lower()
+    if not value:
+        is_linux_arm = sys.platform.startswith("linux") and platform.machine().lower() in {
+            "aarch64",
+            "arm64",
+        }
+        value = "chromium" if is_linux_arm else "chrome"
+    return None if value == "chromium" else value
+
+
+def _profile_lock_pid(profile_dir: Path) -> int | None:
+    """PID del Chromium que tiene abierto el perfil (SingletonLock), si sigue vivo."""
+    lock = profile_dir / "SingletonLock"
+    if not lock.is_symlink():
+        return None
+    try:
+        pid = int(os.readlink(lock).rsplit("-", 1)[-1])
+        os.kill(pid, 0)
+    except (ValueError, OSError):
+        return None
+    return pid
+
+
+def _is_missing_browser_error(error: BaseException) -> bool:
+    text = str(error).lower()
+    return ("distribution" in text and "not found" in text) or "playwright install" in text
 
 
 class BrowserSession:
@@ -42,10 +77,17 @@ class BrowserSession:
         elif use_configured_profile:
             profile_dir = self.config.browser_user_data_dir
             if not profile_dir.is_dir():
-                raise FileNotFoundError(
-                    f"No se encontró el perfil de Chrome configurado: {profile_dir}. "
-                    "Configura browser_user_data_dir o restaura el perfil local."
-                )
+                if os.environ.get("PROVIDERS_PROFILE_FALLBACK") != "1":
+                    raise FileNotFoundError(
+                        f"No se encontró el perfil de Chrome configurado: {profile_dir}. "
+                        "Configura browser_user_data_dir o restaura el perfil local."
+                    )
+                # VM: no existe el clon del perfil local; se usa el perfil persistente
+                # propio del proveedor (se inicia a mano una vez con Ingresar).
+                print(f"  [Browser] No existe {profile_dir}; uso el perfil propio de {self.profile_name}.")
+                use_configured_profile = False
+                profile_dir = _PROFILES_BASE / self.profile_name
+                profile_dir.mkdir(parents=True, exist_ok=True)
         else:
             profile_dir = _PROFILES_BASE / self.profile_name
             profile_dir.mkdir(parents=True, exist_ok=True)
@@ -83,10 +125,13 @@ class BrowserSession:
             "locale": "es-AR",
             "timezone_id": "America/Argentina/Buenos_Aires",
         }
-        # Por defecto Google Chrome; PROVIDERS_BROWSER_CHANNEL=chromium usa el Chromium
-        # de Playwright (necesario en VM ARM, donde Chrome no existe).
-        channel = os.environ.get("PROVIDERS_BROWSER_CHANNEL", "chrome").strip()
-        if channel and channel != "chromium":
+        # Canal único del proyecto (ver browser_channel); PROVIDERS_BROWSER_EXECUTABLE
+        # fuerza un binario concreto.
+        executable = os.environ.get("PROVIDERS_BROWSER_EXECUTABLE", "").strip()
+        channel = browser_channel()
+        if executable:
+            launch_options["executable_path"] = executable
+        elif channel:
             launch_options["channel"] = channel
         if self.config.browser_user_agent:
             launch_options["user_agent"] = self.config.browser_user_agent
@@ -97,9 +142,24 @@ class BrowserSession:
         if args:
             launch_options["args"] = args
         try:
-            self.context = await self._playwright.chromium.launch_persistent_context(
-                **launch_options,
-            )
+            pid = _profile_lock_pid(profile_dir)
+            if pid:
+                raise RuntimeError(
+                    f"El perfil {profile_dir.name} está abierto en otro navegador (pid {pid}). "
+                    "Cerralo desde el escritorio remoto y reintentá."
+                )
+            try:
+                self.context = await self._playwright.chromium.launch_persistent_context(
+                    **launch_options,
+                )
+            except Exception as error:
+                if "channel" not in launch_options or not _is_missing_browser_error(error):
+                    raise
+                print(f"  [Browser] {launch_options['channel']} no está instalado; uso el Chromium de Playwright.")
+                launch_options.pop("channel")
+                self.context = await self._playwright.chromium.launch_persistent_context(
+                    **launch_options,
+                )
             self.page = await self.context.new_page()
         except BaseException:
             await self.__aexit__(*sys.exc_info())

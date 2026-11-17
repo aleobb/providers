@@ -8,7 +8,7 @@
 4. Actualizar: `git pull && sudo systemctl restart providers-agent`.
 
 Free tier: el agente solo consulta Supabase cada 5 s y no consume nada más; no hay costos adicionales.
-En ARM se usa Chromium de Playwright (`PROVIDERS_BROWSER_CHANNEL=chromium`); algunos portales podrían reaccionar distinto a Chrome.
+En Linux ARM se usa automáticamente el Chromium de Playwright (sin variable); en otros equipos, Chrome. `PROVIDERS_BROWSER_CHANNEL` fuerza otro canal y `PROVIDERS_BROWSER_EXECUTABLE` un binario concreto. Si el canal pedido no está instalado, se cae al Chromium de Playwright.
 
 ## Escritorio por Cloudflare Tunnel (opcional, alternativa al túnel SSH)
 
@@ -27,3 +27,18 @@ Verificar: `systemctl status cloudflared`. Quitar: `sudo cloudflared service uni
 `--supabase` y `--perfil` NO leen credenciales de Supabase (`--perfil` solo elige el alias en la sqlite local `.credentials/`, vacía en la VM).
 Solo `--ejecucion-id`, que usa el agente, las toma de Supabase. Para depurar: pedir Debug/Ingresar desde `/proveedores`
 con el agente activo y ver el navegador por noVNC.
+
+## Navegador del escritorio (mismo binario que el agente)
+
+`bash deploy/oracle/instalar-navegador.sh` (idempotente; informa `[ok]`/`[!!]` por paso):
+activa `linger`, instala el lanzador `providers-browser` y la entrada de menú *Chromium (providers)*,
+lo fija como navegador predeterminado (xdg, XFCE y `sensible-browser`), agrega `PROVIDERS_PROFILE_FALLBACK=1`
+al env del agente, corrige `After=` de la unidad (KasmVNC) y comprueba que `DISPLAY` exista.
+
+- Perfiles en `.chrome_profile/<perfil>`; el agente usa el de cada proveedor (persisten entre ejecuciones).
+  `providers-browser` abre `escritorio`; `providers-browser telecentro` abre el perfil de Telecentro para
+  iniciar sesión a mano (MFA/CAPTCHA) y que el agente lo reutilice. Un perfil no se puede abrir dos veces:
+  si el agente lo usa, el lanzador avisa; si el navegador del escritorio lo tiene abierto, el agente
+  falla con un mensaje claro en lugar de un error de Playwright.
+- `PROVIDERS_PROFILE_FALLBACK=1`: si falta el clon de perfil de Chrome de Telecentro (`telecentro_default_clone`),
+  `Debug`/`Ingresar` usan el perfil propio del proveedor en vez de fallar.

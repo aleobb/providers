@@ -17,7 +17,7 @@ Script Python para loguearse en portales web de proveedores de servicios (con us
 ├── core/
 │   ├── __init__.py
 │   ├── accounts.py                  # Account dataclass + select_account()
-│   ├── browser.py                   # BrowserSession (system Chrome via channel="chrome")
+│   ├── browser.py                   # BrowserSession y browser_channel() (canal único: Chrome; Chromium de Playwright en Linux ARM)
 │   ├── cli.py                       # CLI unificado (--proveedor, --todas, --listar, --debug, --cuenta)
 │   ├── config.py                    # BaseProviderConfig; credenciales inyectadas desde SQLite
 │   ├── credential_store.py          # Perfiles cifrados de credenciales por proveedor

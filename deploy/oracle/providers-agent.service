@@ -1,6 +1,6 @@
 [Unit]
 Description=Agente de ejecuciones de providers
-After=network-online.target vnc.service
+After=network-online.target kasmvnc.service
 Wants=network-online.target
 
 [Service]

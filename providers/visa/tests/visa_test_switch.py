@@ -19,6 +19,7 @@ from playwright.async_api import async_playwright
 
 load_dotenv()
 
+from core.browser import browser_channel
 from providers.visa.config import VisaConfig
 
 DUMP_DIR = PROJECT_ROOT / "visa_switch_test"
@@ -108,7 +109,7 @@ async def main():
     config = VisaConfig()
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False, channel="chrome")
+        browser = await p.chromium.launch(headless=False, channel=browser_channel())
         context = await browser.new_context()
         page = await context.new_page()
 

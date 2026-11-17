@@ -18,6 +18,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import vm_exec
 from integrations.supabase_sync.client import (
     SupabaseClient,
     SupabaseConfigurationError,
@@ -143,12 +144,22 @@ def main() -> int:
         return run_execution(client, row)
 
     recover_stale(client, name)
+    vm_enabled = bool(os.environ.get("VM_APPROVAL_KEY", "").strip())
+    if vm_enabled:
+        try:
+            vm_exec.recover_interrupted(client, name)
+        except SupabaseError as error:
+            print(f"[Agente] vm_comandos: {error}", file=sys.stderr)
     print(f"[Agente] {name} escuchando ejecuciones pendientes (Ctrl+C para salir).")
+    if vm_enabled:
+        print("[Agente] Comandos de la VM con aprobación: activados.")
     while True:
         try:
             row = claim(client, {"runner": "eq.agente"}, name)
             if row is not None:
                 run_execution(client, row)
+                continue
+            if vm_enabled and vm_exec.run_pending(client, name):
                 continue
         except SupabaseError as error:
             print(f"[Agente] {error}", file=sys.stderr)

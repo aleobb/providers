@@ -37,5 +37,6 @@ PY
 
 # Mismos flags que usa Playwright en Linux: sin sandbox (Ubuntu 24.04 restringe los user namespaces)
 # y almacén de contraseñas básico, para que las cookies del perfil se lean igual desde el agente.
+# --disable-gpu: la VM no tiene GPU (evita los errores de SharedImage/GL en la consola).
 exec "$EXE" --user-data-dir="$PROFILE_DIR" --no-sandbox --password-store=basic \
-  --lang=es-AR --no-first-run --no-default-browser-check "$@"
+  --lang=es-AR --no-first-run --no-default-browser-check --disable-gpu "$@"

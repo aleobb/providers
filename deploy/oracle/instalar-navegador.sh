@@ -34,7 +34,9 @@ ok "entrada de menú Chromium (providers)"
 
 # 3. Navegador predeterminado (xdg y helper de XFCE para "Web Browser")
 xdg-settings set default-web-browser providers-chromium.desktop 2>/dev/null \
-  && ok "navegador predeterminado (xdg)" || warn "xdg-settings falló"
+  && ok "navegador predeterminado (xdg)" \
+  || { xdg-mime default providers-chromium.desktop text/html x-scheme-handler/http x-scheme-handler/https \
+       && ok "navegador predeterminado (xdg-mime)" || warn "no se pudo fijar el predeterminado de xdg (no es crítico)"; }
 cat > "$HOME/.local/share/xfce4/helpers/providers-chromium.desktop" <<HELP
 [Desktop Entry]
 NoDisplay=true

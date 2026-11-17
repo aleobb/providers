@@ -42,3 +42,16 @@ al env del agente, corrige `After=` de la unidad (KasmVNC) y comprueba que `DISP
   falla con un mensaje claro en lugar de un error de Playwright.
 - `PROVIDERS_PROFILE_FALLBACK=1`: si falta el clon de perfil de Chrome de Telecentro (`telecentro_default_clone`),
   `Debug`/`Ingresar` usan el perfil propio del proveedor en vez de fallar.
+
+## Comandos de la VM con aprobación (Claude)
+
+Tabla `vm_comandos` (Supabase). Claude solicita un comando, Ale lo revisa y aprueba en `/proveedores` (sección
+«Comandos de la VM»): el Worker firma el texto exacto con HMAC-SHA256 (`VM_APPROVAL_KEY`) y el agente (`vm_exec.py`)
+solo ejecuta pedidos con firma válida, sin vencer, y una única vez. Quien solicita no conoce la clave, así que
+no puede aprobarse solo.
+
+- Activar: `bash deploy/oracle/configurar-aprobacion.sh` (genera la clave, reinicia el agente y la muestra una vez);
+  esa misma clave va como secret `VM_APPROVAL_KEY` del Worker `finanzas`. Sin la clave la función queda desactivada.
+- El comando corre con `bash -lc` como el usuario del agente, sin los secretos del agente en el entorno, con
+  tiempo máximo (5–1800 s) y salida recortada y redactada (se reemplazan los valores de los secretos por `***`).
+- Un comando que reinicia el agente lo interrumpe y queda `error` («Interrumpido»).

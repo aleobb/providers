@@ -1,9 +1,10 @@
 # Agente de providers en la VM de Oracle
 
+> **Estado actual (2026-11-19):** el escritorio de la VM usa **KasmVNC** (puerto 8444, servicio `kasmvnc`), publicado en `https://vm.finanzas.pp.ua` por Cloudflare Tunnel + Access. noVNC/TigerVNC (`vnc.service`, `novnc.service`, puerto 6080) quedó como **legado**: `instalar.sh` todavía lo instala. ⚠ La instalación de KasmVNC **no está versionada aquí** (pendiente). Documentación completa (arquitectura, runbooks, línea base de la VM): repo `aleobb/finanzas`, `docs/arquitectura/vm-oracle.md` y `docs/operaciones/runbook-vm-oracle.md`.
+
 1. En la VM: `git clone https://github.com/aleobb/providers && cd providers && bash deploy/oracle/instalar.sh`
    (la primera vez crea `~/.providers-agent.env`; completalo y volvé a correr el script).
-2. Ver el navegador (para `Debug` e `Ingresar`): `ssh -L 6080:localhost:6080 <usuario>@<ip-vm>` y abrir
-   `http://localhost:6080/vnc.html`. VNC/noVNC escuchan solo en localhost: no abras puertos en Oracle.
+2. Ver el navegador (para `Debug` e `Ingresar`): abrir `https://vm.finanzas.pp.ua` (KasmVNC tras Cloudflare Access). Alternativa **legada** con noVNC: `ssh -L 6080:localhost:6080 <usuario>@<ip-vm>` y abrir `http://localhost:6080/vnc.html`. Los servicios de escritorio escuchan solo en localhost: no abras puertos en Oracle.
 3. Operación: `systemctl status providers-agent`, `journalctl -u providers-agent -f`.
 4. Actualizar: `git pull && sudo systemctl restart providers-agent`.
 
@@ -16,9 +17,9 @@ Requiere un dominio propio gestionado en Cloudflare (los `*.workers.dev` no sirv
 
 1. Zero Trust > Networks > Tunnels > Create tunnel (Cloudflared); copiar el token.
 2. En la VM: `cd ~/providers && git pull && bash deploy/oracle/instalar-tunnel.sh` (pega el token).
-3. En el túnel, Public hostname: `vm.<tu-dominio>` -> Service `HTTP` `localhost:6080`.
+3. En el túnel, Public hostname: `vm.<tu-dominio>` -> Service `HTTP` `localhost:8444` (KasmVNC; con noVNC era `localhost:6080`).
 4. Zero Trust > Access > Applications: app self-hosted para `vm.<tu-dominio>` con una policy Allow solo para tu email. Sin esta app el escritorio quedaría expuesto.
-5. Abrir `https://vm.<tu-dominio>/vnc.html`.
+5. Abrir `https://vm.<tu-dominio>/` (con noVNC: `/vnc.html`).
 
 Verificar: `systemctl status cloudflared`. Quitar: `sudo cloudflared service uninstall`.
 
@@ -26,7 +27,7 @@ Verificar: `systemctl status cloudflared`. Quitar: `sudo cloudflared service uni
 
 `--supabase` y `--perfil` NO leen credenciales de Supabase (`--perfil` solo elige el alias en la sqlite local `.credentials/`, vacía en la VM).
 Solo `--ejecucion-id`, que usa el agente, las toma de Supabase. Para depurar: pedir Debug/Ingresar desde `/proveedores`
-con el agente activo y ver el navegador por noVNC.
+con el agente activo y ver el navegador por el escritorio remoto (KasmVNC).
 
 ## Navegador del escritorio (mismo binario que el agente)
 
@@ -47,12 +48,12 @@ al env del agente, corrige `After=` de la unidad (KasmVNC) y comprueba que `DISP
 
 ## Comandos de la VM con aprobación (Claude)
 
-Tabla `vm_comandos` (Supabase). Claude solicita un comando, Ale lo revisa y aprueba en `/proveedores` (sección
-«Comandos de la VM»): el Worker firma el texto exacto con HMAC-SHA256 (`VM_APPROVAL_KEY`) y el agente (`vm_exec.py`)
+Tabla `vm_comandos` (Supabase). Claude solicita un comando, Ale lo revisa y aprueba en `/vm-comandos` (enlace
+«Comandos de la VM» en el sidebar y en `/proveedores`): el Worker firma el texto exacto con HMAC-SHA256 (`VM_APPROVAL_KEY`) y el agente (`vm_exec.py`)
 solo ejecuta pedidos con firma válida, sin vencer, y una única vez. Quien solicita no conoce la clave, así que
 no puede aprobarse solo.
 
-- Activar: `bash deploy/oracle/configurar-aprobacion.sh` (genera la clave, reinicia el agente y la muestra una vez);
+- Activar: `bash deploy/oracle/configurar-aprobacion.sh` (genera la clave si no existe, reinicia el agente y la muestra una vez; **si `VM_APPROVAL_KEY` ya existe no la cambia**: para rotarla, borrar esa línea de `~/.providers-agent.env` y correr el script **desde la terminal del escritorio, no por `/vm-comandos`**, porque la clave nueva se imprimiría sin redactar);
   esa misma clave va como secret `VM_APPROVAL_KEY` del Worker `finanzas`. Sin la clave la función queda desactivada.
 - El comando corre con `bash -lc` como el usuario del agente, sin los secretos del agente en el entorno, con
   tiempo máximo (5–1800 s) y salida recortada y redactada (se reemplazan los valores de los secretos por `***`).

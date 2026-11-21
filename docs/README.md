@@ -5,10 +5,7 @@ La documentación completa del proyecto vive en el repo **`aleobb/finanzas`** (`
 | Tema | Dónde |
 |---|---|
 | Guía para agregar un portal nuevo | [`guia-agregar-portal.md`](guia-agregar-portal.md) |
-| Arquitectura de Providers y ejecuciones | finanzas → `docs/arquitectura/providers-ejecuciones.md` (ARQ-06) |
-| VM Oracle (instalación, runbook) | finanzas → `docs/arquitectura/vm-oracle.md`, `docs/operaciones/runbook-vm-oracle.md`; en este repo `deploy/oracle/README.md` |
-| Ejecuciones fallidas | finanzas → `docs/operaciones/runbook-ejecuciones-fallidas.md` |
-| Proveedores, portales y perfiles | finanzas → `docs/operaciones/runbook-proveedores-y-perfiles.md` |
-| Plan de pruebas de Providers | finanzas → `docs/qa/plan-pruebas-providers.md` |
-| Troubleshooting | finanzas → `docs/desarrollo/troubleshooting.md` |
+| Arquitectura de Providers y ejecuciones | finanzas → `docs/TECNICO.md` §6 |
+| VM Oracle, proveedores/perfiles y ejecuciones fallidas | finanzas → `docs/OPERACIONES.md` §3 y §4; en este repo `deploy/oracle/README.md` |
+| Troubleshooting | finanzas → `docs/TECNICO.md` §11 |
 | Normas de trabajo del repo | [`../CLAUDE.md`](../CLAUDE.md) y [`../.github/copilot-instructions.md`](../.github/copilot-instructions.md) |

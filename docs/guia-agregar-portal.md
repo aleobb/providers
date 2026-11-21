@@ -25,10 +25,10 @@ providers/<portal>/
 3. **Navegador:** usar siempre `core.browser` (la decisión de canal es única: `browser_channel()`); no lanzar navegadores por cuenta propia. Si el portal necesita perfil persistente, `can_resume_session = True`.
 4. **Datos del PDF:** definir `invoice_data_patterns` (identificador de cuenta, vencimiento actual y próximo, importes) y probarlos con PDFs de muestra **sintéticos** (los reales tienen datos personales y no van al repo).
 5. **Pruebas:** `providers/<portal>/tests/test_<portal>_*.py`. Nombres de módulo únicos. Probar login (con mocks), cuentas, descarga y extracción. Ejecutar `python -m pytest`.
-6. **Alta en Supabase** (desde finanzas; ver `docs/operaciones/runbook-proveedores-y-perfiles.md` §4): fila en `proveedor_portales` (`codigo` = `name`, `modo`, `requiere_2fa`, `campos_login`) y perfil de credenciales por la UI.
+6. **Alta en Supabase** (desde finanzas; ver `docs/OPERACIONES.md` §4): fila en `proveedor_portales` (`codigo` = `name`, `modo`, `requiere_2fa`, `campos_login`) y perfil de credenciales por la UI.
 7. **Probar en la VM:** acción **Debug** (navegador visible) → **Descargar** → verificar el comprobante creado (concepto + vencimiento, sin duplicar) y el PDF en Storage.
 8. **Criterio de «estable»:** ver `docs/qa/plan-pruebas-providers.md` §5. No programar hasta cumplirlo.
-9. **Documentar:** CHANGELOG, `docs/arquitectura/modelo-de-datos.md` (lista de portales), matriz de `plan-pruebas-providers.md`.
+9. **Documentar:** CHANGELOG, `docs/FUNCIONAL.md` §5 (lista de portales) y `docs/PENDIENTES.md` (B-20, validación del portal).
 
 ## 4. Reglas
 - No tocar `core/` para resolver algo de un solo portal: usar un hook.

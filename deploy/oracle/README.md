@@ -1,6 +1,6 @@
 # Agente de providers en la VM de Oracle
 
-> **Estado actual (2026-11-19):** el escritorio de la VM usa **KasmVNC** (puerto 8444, servicio `kasmvnc`), publicado en `https://vm.finanzas.pp.ua` por Cloudflare Tunnel + Access. noVNC/TigerVNC (`vnc.service`, `novnc.service`, puerto 6080) quedó como **legado**: `instalar.sh` todavía lo instala. ⚠ La instalación de KasmVNC **no está versionada aquí** (pendiente). Documentación completa (arquitectura, runbooks, línea base de la VM): repo `aleobb/finanzas`, `docs/arquitectura/vm-oracle.md` y `docs/operaciones/runbook-vm-oracle.md`.
+> **Estado actual (2026-11-19):** el escritorio de la VM usa **KasmVNC** (puerto 8444, servicio `kasmvnc`), publicado en `https://vm.finanzas.pp.ua` por Cloudflare Tunnel + Access. noVNC/TigerVNC (`vnc.service`, `novnc.service`, puerto 6080) quedó como **legado**: `instalar.sh` todavía lo instala. ⚠ La instalación de KasmVNC **no está versionada aquí** (pendiente). Documentación completa (arquitectura, runbooks, línea base de la VM): repo `aleobb/finanzas`, `docs/OPERACIONES.md` §3.
 
 1. En la VM: `git clone https://github.com/aleobb/providers && cd providers && bash deploy/oracle/instalar.sh`
    (la primera vez crea `~/.providers-agent.env`; completalo y volvé a correr el script).

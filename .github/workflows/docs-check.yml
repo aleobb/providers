@@ -1,0 +1,35 @@
+name: Docs check
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'docs/**'
+      - 'AGENTS.md'
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - 'tools/docs_check.py'
+      - '.github/workflows/docs-check.yml'
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'AGENTS.md'
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - 'tools/docs_check.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Verificar documentación
+        run: python tools/docs_check.py

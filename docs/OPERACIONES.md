@@ -2,7 +2,7 @@
 id: PRV-OPS
 titulo: Operaciones de providers (agente, VM Oracle y workflows)
 estado: vigente
-ultima_revision: 2026-11-21
+ultima_revision: 2026-11-22
 resumen: Cómo operar el agente de providers: instalación y mantenimiento de la VM Oracle (KasmVNC, Cloudflare Tunnel, navegador, comandos con aprobación), línea base verificada de la VM, workflows de GitHub Actions, alta de portales y perfiles, ejecuciones fallidas y rotación de claves.
 fuentes: [deploy/oracle (scripts), workflows, línea base de la VM del 2026-11-21, README anterior de deploy/oracle]
 relacionados: [PRV-TEC, PRV-POR, PRV-DEC, PRV-PEN]
@@ -26,7 +26,7 @@ Secrets del repo: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `PROVIDERS_CREDENTIALS
 ## 2. VM Oracle: datos y línea base
 > **TL;DR:** Ubuntu 24.04 ARM, 2 CPU, 11 GiB, sin swap ni Docker; servicios `kasmvnc`, `cloudflared` y `providers-agent` activos; apagada de 23:45 a 06:45 (hora Buenos Aires) por el Resource Scheduler.
 
-Línea base verificada el **2026-11-21** (comando de solo lectura aprobado desde `/vm-comandos`): hostname `ab-finanzas-vnic`; Ubuntu 24.04.5 LTS, kernel `7.0.0-1016-oracle`; RAM 11 GiB (1,1 GiB en uso), **sin swap**; disco 96 GB (12 GB usados, 13 %); los tres servicios `active`; escuchan en toda la interfaz solo SSH 22 y `rpcbind` 111 (⚠ cerrar `rpcbind` si no se usa), el resto en localhost (KasmVNC 8444, cups 631, cloudflared 20241); journal de 241,9 MB con el límite por defecto de systemd, luego limitado a 200 MB y 30 días (`/etc/systemd/journald.conf.d/limite.conf`, 2026-11-21); `logrotate.d` sin entradas de providers; sin timers de backup locales (los backups son de Oracle); Python 3.12.3, Node 18.19.1, sin Docker; 27 paquetes por actualizar. El uptime coincide con el encendido de las 06:45.
+Línea base verificada el **2026-11-21** (comando de solo lectura aprobado desde `/vm-comandos`): hostname `ab-finanzas-vnic`; Ubuntu 24.04.5 LTS, kernel `7.0.0-1016-oracle`; RAM 11 GiB (1,1 GiB en uso), **sin swap**; disco 96 GB (12 GB usados, 13 %); los tres servicios `active`; escuchan en toda la interfaz solo SSH 22 y `rpcbind` 111 (⚠ cerrar `rpcbind` si no se usa), el resto en localhost (KasmVNC 8444, cups 631, cloudflared 20241); journal de 241,9 MB con el límite por defecto de systemd, luego limitado a 200 MB y 30 días (`/etc/systemd/journald.conf.d/limite.conf`, 2026-11-21) y subido a 500 MB el 2026-11-22 (0,5 % del disco, sin impacto de rendimiento); `logrotate.d` sin entradas de providers; sin timers de backup locales (los backups son de Oracle); Python 3.12.3, Node 18.19.1, sin Docker; 27 paquetes por actualizar. El uptime coincide con el encendido de las 06:45.
 
 - **Escritorio:** XFCE + KasmVNC (puerto 8444, servicio `kasmvnc`, solo localhost) publicado en `https://vm.finanzas.pp.ua` por Cloudflare Tunnel (`cloudflared`) con una app de Access (email + PIN) delante; **sin la app de Access el escritorio quedaría expuesto**. SSH 22 queda como respaldo (clave `ab-finanzas_ssh-key.key`, en la PC de Ale).
 - **Agente:** unidad `providers-agent` (usuario `ubuntu`, `After=network-online.target kasmvnc.service`, `Restart=always`, `RestartSec=10`), `ExecStart=<repo>/.venv/bin/python agent.py`, `EnvironmentFile=~/.providers-agent.env` (modo 600; variables: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `PROVIDERS_CREDENTIALS_KEY`, `VM_APPROVAL_KEY`, `AGENT_NAME`, `DISPLAY`, `PROVIDERS_BROWSER_CHANNEL`, `PROVIDERS_PROFILE_FALLBACK=1`, Google vacías). Código en `~/providers` (rama `master`), venv `.venv`.

@@ -25,7 +25,7 @@ relacionados: [PRV-TEC, PRV-POR, PRV-OPS, PRV-DEC]
 | PV-06 | Medifé y Telecentro: confirmar estabilidad del runner `actions` o pasarlos a `agente` | P2 | Abierto |
 | PV-07 | PDFs sintéticos para recuperar los 30 tests omitidos y `pytest` en `requirements-dev.txt` | P3 | Abierto |
 | PV-08 | `tools/paridad_airtable.py` (comparar un CSV exportado de Airtable contra Supabase) | P2 | Idea |
-| PV-09 | Cerrar `rpcbind` (111) en la VM si no se usa; evaluar swap, límite del journal y logrotate de logs propios | P2 | Abierto (hallazgo de la línea base 2026-11-21) |
+| PV-09 | Cerrar `rpcbind` (111) y actualizar paquetes en la VM (pedidos solicitados 2026-11-22); evaluar swap y logrotate de logs propios (journal ya limitado a 200 MB / 30 días) | P2 | En curso |
 | PV-10 | Unificar métodos de navegador sin perder lo que funciona | P2 | Parcial (`browser_channel()` hecho) |
 | PV-11 | Evaluar orquestador (n8n vs LangGraph/CrewAI/AutoGen); requeriría Docker y swap | P3 | Sin decidir |
 

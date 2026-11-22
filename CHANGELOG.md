@@ -2,6 +2,9 @@
 
 Una entrada por cambio, la más reciente arriba. El historial anterior está en Git.
 
+## 2026-11-22 — VM: journal limitado
+- El journal de la VM queda limitado a 200 MB y 30 días; se documenta en `docs/OPERACIONES.md` §2. Pedidos de actualización de paquetes y cierre de `rpcbind` en curso.
+
 ## 2026-11-21 — Documentación propia e independiente del repo
 - Nueva documentación autosuficiente: `AGENTS.md` (guía y reglas), `README.md` (puesta en marcha y uso) y `docs/` con `TECNICO.md`, `PORTALES.md`, `OPERACIONES.md`, `DECISIONES.md` y `PENDIENTES.md` (versión productiva vigente, `resumen` en el frontmatter y TL;DR por sección).
 - `CLAUDE.md` y `.github/copilot-instructions.md` pasan a ser punteros a `AGENTS.md`; la guía de portales y el README de `deploy/oracle/` se integran en `docs/PORTALES.md` y `docs/OPERACIONES.md`. Se corrigió contenido desactualizado (noVNC, Aysa y Medifé ausentes, referencias a documentos de finanzas inexistentes).

@@ -2,6 +2,10 @@
 
 Una entrada por cambio, la más reciente arriba. El historial anterior está en Git.
 
+## 2026-11-24 — Docs: trabajo secuencial entre IAs y permisos locales fuera de Git
+- `AGENTS.md`: mismas reglas que en finanzas (leer los últimos commits al empezar, sin ramas ni PRs, push rechazado → `git pull --rebase` sin `--force`, cierre de sesión).
+- `.claude/settings.local.json` (permisos locales de Claude Code, con comodines) deja de versionarse y se agrega al `.gitignore`; `.claude/launch.json` se mantiene.
+
 ## 2026-11-22 — VM: journal a 500 MB y pedidos #5/#6
 - El límite del journal de la VM sube de 200 a 500 MB (30 días); los pedidos de actualización de paquetes y cierre de `rpcbind` (#5 y #6) terminaron ok. Docs: `docs/OPERACIONES.md` §2 y `docs/PENDIENTES.md` (PV-09).
 

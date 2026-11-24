@@ -16,15 +16,16 @@ Cada documento tiene `resumen` en el frontmatter y un **TL;DR** por sección.
 | Saber qué falta | `docs/PENDIENTES.md` |
 | Cambios recientes | `CHANGELOG.md` (lo más reciente arriba) |
 
-Índice: `docs/README.md`. Uso rápido y puesta en marcha: `README.md`.
+Índice: `docs/README.md`. Uso rápido y puesta en marcha: `README.md`. `CLAUDE.md` y `.github/copilot-instructions.md` apuntan a este archivo, para las herramientas que no lo leen solas.
 
 ## Protocolo de cambios (obligatorio)
-1. Partir **siempre del repo** (clonar con el token que Ale pega en el chat); nunca de zips viejos.
+1. Partir **siempre del repo** (clonar con el token que Ale pega en el chat; con git local en la PC, las credenciales de la PC); nunca de zips viejos. Ale trabaja solo y en secuencia desde distintas IAs: al empezar, leer los últimos commits y la cabecera de `CHANGELOG.md` para saber qué hizo la IA anterior.
 2. Antes de cerrar: `python -m pytest` y `git diff --check` (línea base 2026-11-19: 200 pasaron, 30 omitidos).
 3. Actualizar `CHANGELOG.md` (una entrada por cambio, la más reciente arriba) y el documento de `docs/` afectado **en el mismo commit**. No dupliques información entre documentos.
-4. Commit y push directo a `master` (sin PRs). Mantener actualizados ambos repos: cada cambio se commitea y se sube. Commits en español con prefijo (`Providers: …`, `Docs: …`, `CI: …`).
+4. Commit y push directo a `master`, **sin ramas ni PRs**, sea cual sea la IA o persona. Si el push es rechazado: `git pull --rebase`, verificar de nuevo y reintentar; nunca `--force`. Mantener actualizados ambos repos: cada cambio se commitea y se sube. Commits en español con prefijo (`Providers: …`, `Docs: …`, `CI: …`).
 5. Los cambios **solo agregan funciones**: no cambian la forma de ejecutar desde la consola local.
 6. Si un cambio toca tablas, columnas o buckets que usa este repo (`docs/TECNICO.md` §9), coordinarlo con `aleobb/finanzas`.
+7. Cierre de sesión: lo hecho → `CHANGELOG.md`; lo pendiente de este repo → `docs/PENDIENTES.md`; las decisiones → `docs/DECISIONES.md`. La memoria del asistente guarda solo punteros a estos archivos.
 
 ## Reglas de diseño (frontera de proveedores)
 - `core/` e `integrations/` son **agnósticos**: sin ramas, búsquedas, etiquetas, nombres de variables de entorno ni casos especiales por nombre de proveedor.

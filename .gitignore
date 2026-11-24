@@ -47,6 +47,9 @@ venv/
 env/
 ENV/
 
+# Claude Code: permisos locales (no versionar)
+.claude/settings.local.json
+
 # IDE
 .vscode/
 .idea/

@@ -37,7 +37,7 @@ Cada documento tiene `resumen` en el frontmatter y un **TL;DR** por sección.
 
 ## Secretos y archivos sensibles — reglas duras
 - **Nunca** escribas tokens, claves ni contraseñas en archivos, commits, docs, logs, memoria ni salida de herramientas. Si Ale pega un token en el chat, úsalo en el entorno del comando y no lo repitas; no clones con el token en la URL guardada (usa `git -c http.extraHeader=…`).
-- Nunca imprimas credenciales, cookies, `Authorization` ni JWT: los logs de ejecución no se redactan globalmente.
+- Nunca imprimas credenciales, cookies, `Authorization` ni JWT: los logs de ejecución solo redactan los secretos que el proceso conoce (`core/redact.py`), no cookies ni otros datos sensibles.
 - No agregues credenciales de portales a `.env`.
 - `.sessions/`, `.chrome_profile/` y `.credentials/` son sensibles: no borrarlos ni subirlos.
 - Documenta secretos solo por **nombre y ubicación**; `tools/docs_check.py` busca patrones de secretos.

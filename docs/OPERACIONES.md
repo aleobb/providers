@@ -77,6 +77,6 @@ Línea base verificada el **2026-11-21** (comando de solo lectura aprobado desde
 ## 8. Rotación de claves de este repo
 > **TL;DR:** crear la nueva → actualizar todos los lugares → verificar → revocar la vieja.
 
-- **`PROVIDERS_CREDENTIALS_KEY` (Fernet):** vive en la VM (`~/.providers-agent.env`), en Secrets de este repo, en el Worker de finanzas (`CREDENTIALS_KEY`/`PROVIDERS_CREDENTIALS_KEY`) y en la PC de Ale. Rotarla exige recifrar los `credenciales_enc` de todos los perfiles y actualizar todo a la vez; este repo admite una sola clave. ⚠ Falta la herramienta de recifrado. Perder la clave = recargar las credenciales a mano.
+- **`PROVIDERS_CREDENTIALS_KEY` (Fernet):** vive en la VM (`~/.providers-agent.env`), en Secrets de este repo, en el Worker de finanzas (`CREDENTIALS_KEY`/`PROVIDERS_CREDENTIALS_KEY`) y en la PC de Ale. Admite varias claves separadas por coma (la primera cifra, todas descifran; igual que el Worker). Para rotar: poner `nueva,vieja` en todos los lugares → `python tools/recifrar_credenciales.py --dry-run` y luego sin `--dry-run` (recifra `portal_perfiles.credenciales_enc` con la primera) → verificar una ejecución → quitar la vieja. Perder la clave = recargar las credenciales a mano.
 - **`SUPABASE_SERVICE_KEY`:** crear la nueva en Supabase → Secrets de este repo, `~/.providers-agent.env` y Worker → verificar con una ejecución → revocar la vieja.
 - **Clave SSH:** agregar la pública nueva a `authorized_keys`, probar y recién entonces quitar la vieja.

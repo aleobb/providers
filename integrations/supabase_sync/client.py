@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import time
 from dotenv import load_dotenv
 from typing import Any
 from urllib.parse import quote
@@ -9,6 +10,14 @@ from urllib.parse import quote
 import httpx
 
 load_dotenv()
+
+# Reintentos ante fallos transitorios. Las lecturas se reintentan ante cualquier error de red, 429 o 5xx.
+# Las escrituras solo cuando el pedido seguro no llegó (no se pudo conectar) o Supabase lo rechazó (429):
+# repetir un PATCH/POST que sí se aplicó podría duplicar o desreclamar un pedido.
+_RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
+_READ_METHODS = frozenset({"GET", "HEAD"})
+_sleep = time.sleep
+
 
 class SupabaseConfigurationError(Exception):
     """Falta configurar la conexión a Supabase."""
@@ -26,6 +35,8 @@ class SupabaseClient:
         *,
         timeout: float = 30.0,
         http: httpx.Client | None = None,
+        retries: int = 2,
+        backoff: float = 0.5,
     ) -> None:
         self.url = (url or os.environ.get("SUPABASE_URL", "")).strip().rstrip("/")
         self.key = (key or os.environ.get("SUPABASE_SERVICE_KEY", "")).strip()
@@ -42,6 +53,8 @@ class SupabaseClient:
                 f"Falta configurar: {', '.join(missing)}."
             )
         self._http = http or httpx.Client(timeout=timeout)
+        self._retries = max(0, retries)
+        self._backoff = backoff
 
     # ------------------------------------------------------------ internals
     def _headers(self, extra: dict[str, str] | None = None) -> dict[str, str]:
@@ -53,17 +66,35 @@ class SupabaseClient:
             headers.update(extra)
         return headers
 
-    def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+    def _request(
+        self, method: str, path: str, *, idempotent: bool = False, **kwargs: Any
+    ) -> httpx.Response:
         extra = kwargs.pop("headers", None)
-        try:
-            response = self._http.request(
-                method,
-                f"{self.url}{path}",
-                headers=self._headers(extra),
-                **kwargs,
+        safe = idempotent or method in _READ_METHODS
+        for attempt in range(self._retries + 1):
+            last = attempt == self._retries
+            try:
+                response = self._http.request(
+                    method,
+                    f"{self.url}{path}",
+                    headers=self._headers(extra),
+                    **kwargs,
+                )
+            except httpx.HTTPError as error:
+                never_sent = isinstance(error, (httpx.ConnectError, httpx.ConnectTimeout))
+                if last or not (safe or never_sent):
+                    raise SupabaseError(
+                        f"No se pudo conectar con Supabase: {error}"
+                    ) from error
+                _sleep(self._backoff * 2**attempt)
+                continue
+            retry_status = response.status_code in _RETRY_STATUS and (
+                safe or response.status_code == 429
             )
-        except httpx.HTTPError as error:
-            raise SupabaseError(f"No se pudo conectar con Supabase: {error}") from error
+            if retry_status and not last:
+                _sleep(self._backoff * 2**attempt)
+                continue
+            break
         if response.status_code >= 400:
             raise SupabaseError(
                 f"Supabase {response.status_code}: {response.text[:500]}"
@@ -118,6 +149,7 @@ class SupabaseClient:
             "POST",
             f"/storage/v1/object/{quote(bucket, safe='')}/{quote(path, safe='/')}",
             content=data,
+            idempotent=upsert,
             headers={
                 "Content-Type": content_type,
                 "x-upsert": "true" if upsert else "false",

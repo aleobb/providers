@@ -12,6 +12,7 @@ import hmac
 import os
 import signal
 import subprocess
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -49,10 +50,16 @@ def _redactar(texto: str) -> str:
     return texto
 
 
+MARCA_RECORTE = "[... salida recortada"
+
+
 def _recortar(texto: str) -> str:
     if len(texto) <= MAX_SALIDA:
         return texto
-    return f"[... salida recortada, se muestran los últimos {MAX_SALIDA} caracteres ...]\n" + texto[-MAX_SALIDA:]
+    cola = texto[-MAX_SALIDA:]
+    if texto.startswith(MARCA_RECORTE):
+        return MARCA_RECORTE + f", se muestran los últimos {MAX_SALIDA} caracteres ...]\n" + cola
+    return f"{MARCA_RECORTE}, se muestran los últimos {MAX_SALIDA} caracteres ...]\n" + cola
 
 
 def _terminar(client: SupabaseClient, row_id: int, estado: str, salida: str, codigo: int | None) -> None:
@@ -72,6 +79,19 @@ def recover_interrupted(client: SupabaseClient, name: str) -> None:
     )
 
 
+def _leer_cola(pipe, destino: bytearray, estado: dict) -> None:
+    """Lee la salida sin guardarla entera: conserva solo el final (la VM no tiene swap)."""
+    tope = MAX_SALIDA * 4  # hasta 4 bytes por carácter
+    while True:
+        bloque = pipe.read(65536)
+        if not bloque:
+            return
+        destino.extend(bloque)
+        if len(destino) > tope * 2:
+            del destino[: len(destino) - tope]
+            estado["recortada"] = True
+
+
 def _ejecutar(comando: str, timeout_s: int) -> tuple[str, int | None, bool]:
     env = {k: v for k, v in os.environ.items() if k not in SECRETOS}
     proceso = subprocess.Popen(
@@ -80,17 +100,25 @@ def _ejecutar(comando: str, timeout_s: int) -> tuple[str, int | None, bool]:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         env=env,
-        text=True,
-        errors="replace",
         start_new_session=True,
     )
+    cola, estado = bytearray(), {"recortada": False}
+    lector = threading.Thread(target=_leer_cola, args=(proceso.stdout, cola, estado), daemon=True)
+    lector.start()
+    agotado = False
     try:
-        salida, _ = proceso.communicate(timeout=timeout_s)
-        return salida or "", proceso.returncode, False
+        proceso.wait(timeout=timeout_s)
     except subprocess.TimeoutExpired:
+        agotado = True
         os.killpg(proceso.pid, signal.SIGKILL)
-        salida, _ = proceso.communicate()
-        return (salida or "") + f"\n[Tiempo agotado: {timeout_s}s]", None, True
+        proceso.wait()
+    lector.join(timeout=10)
+    texto = bytes(cola).decode("utf-8", errors="replace")
+    if estado["recortada"]:
+        texto = f"{MARCA_RECORTE} ...]\n" + texto
+    if agotado:
+        return texto + f"\n[Tiempo agotado: {timeout_s}s]", None, True
+    return texto, proceso.returncode, False
 
 
 def run_pending(client: SupabaseClient, name: str) -> bool:

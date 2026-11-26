@@ -35,6 +35,6 @@ relacionados: [PRV-TEC, PRV-OPS, PRV-PEN]
 Vault de Supabase para credenciales · noVNC/TigerVNC como escritorio principal · flujo mensual `Descargar Facturas` con credenciales planas en Secrets (eliminado el 2026-11-21) · lanzar navegadores por cuenta propia o usar CDP · stealth global (solo por portal que lo necesite).
 
 ## 3. Riesgos aceptados
-> **TL;DR:** los logs de consola no se redactan globalmente y los comandos de la VM pueden usar `sudo`.
+> **TL;DR:** los logs solo redactan los secretos que el proceso conoce y los comandos de la VM pueden usar `sudo`.
 
-Logs de ejecución sin redacción global (un portal que imprima un secreto lo deja guardado) · `sudo` sin contraseña en comandos de la VM, mitigado por la aprobación manual · SSH 22 abierto como respaldo · una sola clave Fernet para todo.
+Logs de ejecución con redacción parcial (`core/redact.py` tapa credenciales, claves del entorno, OTP/MFA y tokens conocidos; un dato sensible de otro tipo, como una cookie, sí queda guardado) · `sudo` sin contraseña en comandos de la VM, mitigado por la aprobación manual · SSH 22 abierto como respaldo · una misma clave Fernet para todo (admite rotación con varias claves, ver `docs/OPERACIONES.md` §8).

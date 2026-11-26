@@ -2,6 +2,15 @@
 
 Una entrada por cambio, la más reciente arriba. El historial anterior está en Git.
 
+## 2026-11-26 — Providers: timeout del agente, reintentos, redacción de logs y multi-clave Fernet
+- Agente: las descargas tienen tiempo máximo (`AGENT_RUN_TIMEOUT_MIN`, 45 min; 25 en GitHub Actions; `debug` e `ingresar` sin límite) y al vencer se corta el árbol de procesos; `--ejecucion` valida que el id sea numérico.
+- `SupabaseClient`: reintentos acotados (lecturas ante red/429/5xx; escrituras solo si no llegó a conectar o 429); el broker de OTP/MFA sigue esperando si Supabase falla un momento.
+- Nuevo `core/redact.py`: los logs de ejecución tapan campos secretos de credenciales, claves del entorno, respuestas OTP/MFA y tokens conocidos (PV-03).
+- Nuevo `core/crypto_keys.py` (MultiFernet) y `tools/recifrar_credenciales.py`: `PROVIDERS_CREDENTIALS_KEY` admite varias claves separadas por coma (PV-04).
+- `vm_exec.py`: la salida de los comandos se lee con tope (solo la cola) en vez de guardarse entera en memoria.
+- `ejecutar-ejecucion.yml`: `permissions: contents: read` y el id de ejecución pasa por `env` con validación.
+- Tests nuevos: redacción, claves, reintentos, timeout del agente, salida de la VM, broker y recifrado. Docs: TECNICO §5/§variables, DECISIONES §3, OPERACIONES §8, PENDIENTES (PV-03/PV-04), AGENTS.
+
 ## 2026-11-24 — Docs: trabajo secuencial entre IAs y permisos locales fuera de Git
 - `AGENTS.md`: mismas reglas que en finanzas (leer los últimos commits al empezar, sin ramas ni PRs, push rechazado → `git pull --rebase` sin `--force`, cierre de sesión).
 - `.claude/settings.local.json` (permisos locales de Claude Code, con comodines) deja de versionarse y se agrega al `.gitignore`; `.claude/launch.json` se mantiene.

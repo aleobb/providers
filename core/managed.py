@@ -12,6 +12,9 @@ Sin ninguno de estos flags, `main.py` se comporta exactamente igual que antes.
 
 Variables: SUPABASE_URL y SUPABASE_SERVICE_KEY. PROVIDERS_PROMPT_TIMEOUT
 (segundos, 600 por defecto) limita la espera de una respuesta.
+
+Los registros que se guardan en Supabase pasan por `core/redact.py`: se tapan los campos secretos de
+las credenciales cargadas, las claves del entorno, las respuestas OTP/MFA y los formatos de token comunes.
 """
 from __future__ import annotations
 
@@ -29,7 +32,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
+from integrations.supabase_sync.client import SupabaseError
+
 from . import hooks, prompts
+from .redact import SECRET_FIELD_NAME, Redactor
 
 _MAX_LINE = 2000
 _PUMP_SECONDS = 2.0
@@ -167,6 +173,8 @@ class ManagedRun:
         self._thread: threading.Thread | None = None
         self._cancelled = False
         self._streams: tuple | None = None
+        self._redactor = Redactor()
+        self._redactor.add_env(os.environ)
 
     # ---------------------------------------------------------------- ciclo
     def start(self) -> None:
@@ -250,6 +258,7 @@ class ManagedRun:
         from cryptography.fernet import Fernet, InvalidToken
 
         from .credential_store import CredentialStore, CredentialStoreError
+        from .crypto_keys import build_cipher
 
         # Clave real (Cloudflare/VM/GitHub secret): se lee ANTES de reemplazarla
         # por la clave efímera del almacén temporal.
@@ -260,7 +269,7 @@ class ManagedRun:
                 "las credenciales guardadas en Supabase."
             )
         try:
-            vault = Fernet(real_key.encode())
+            vault = build_cipher(real_key)
         except ValueError as error:
             raise RuntimeError("PROVIDERS_CREDENTIALS_KEY no es una clave Fernet válida.") from error
 
@@ -314,12 +323,25 @@ class ManagedRun:
                     file=sys.stderr,
                 )
                 continue
+            self._register_secrets(store, portal.get("codigo"), credentials)
             try:
                 store.add_profile(portal["codigo"], profile["alias"], credentials)
                 loaded += 1
             except CredentialStoreError as error:
                 print(f"[Credenciales] {error}", file=sys.stderr)
         print(f"[Credenciales] {loaded} perfil(es) cargado(s) desde Supabase.")
+
+    def _register_secrets(self, store, portal_code, credentials: dict) -> None:
+        """Los campos secretos del portal (o con nombre de clave) nunca llegan al registro."""
+        try:
+            secret_fields = {
+                field.name for field in store.get_credential_fields(portal_code) if field.secret
+            }
+        except Exception:  # noqa: BLE001 - sin metadatos se usa solo el nombre del campo
+            secret_fields = set()
+        for name, value in credentials.items():
+            if name in secret_fields or SECRET_FIELD_NAME.search(str(name)):
+                self._redactor.add(value)
 
     # ----------------------------------------------------------- registro
     def _on_text(self, level: str, text: str) -> None:
@@ -330,7 +352,7 @@ class ManagedRun:
                 line = line.rstrip("\r")
                 if not line.strip():
                     continue
-                line = line[:_MAX_LINE]
+                line = self._redactor.redact(line)[:_MAX_LINE]
                 stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 if self._log_file:
                     marker = "ERR" if level == "error" else "   "
@@ -394,21 +416,34 @@ class ManagedRun:
         self.client.update("ejecuciones", {"id": f"eq.{self.id}"}, {"estado": "esperando_input"})
         timeout = float(os.environ.get("PROVIDERS_PROMPT_TIMEOUT", "600"))
         deadline = time.monotonic() + timeout
+        failures = 0
         while time.monotonic() < deadline:
             time.sleep(2)
-            current = self.client.select_one(
-                "ejecucion_prompts",
-                {"id": f"eq.{row['id']}", "select": "estado,respuesta"},
-            )
+            try:
+                current = self.client.select_one(
+                    "ejecucion_prompts",
+                    {"id": f"eq.{row['id']}", "select": "estado,respuesta"},
+                )
+            except SupabaseError as error:
+                # Un corte breve de Supabase no debe tirar la corrida: se sigue esperando hasta el plazo.
+                failures += 1
+                if failures == 1:
+                    print(f"[Consulta] No se pudo leer la respuesta (se reintenta): {error}", file=sys.stderr)
+                continue
             if current and current["estado"] == "respondido":
                 answer = current.get("respuesta") or ""
-                # No dejar OTP/MFA guardados una vez consumidos.
-                self.client.update(
-                    "ejecucion_prompts", {"id": f"eq.{row['id']}"}, {"respuesta": None}
-                )
-                self.client.update(
-                    "ejecuciones", {"id": f"eq.{self.id}"}, {"estado": "en_curso"}
-                )
+                if kind in ("otp", "mfa"):
+                    self._redactor.add(answer)
+                try:
+                    # No dejar OTP/MFA guardados una vez consumidos.
+                    self.client.update(
+                        "ejecucion_prompts", {"id": f"eq.{row['id']}"}, {"respuesta": None}
+                    )
+                    self.client.update(
+                        "ejecuciones", {"id": f"eq.{self.id}"}, {"estado": "en_curso"}
+                    )
+                except SupabaseError as error:
+                    print(f"[Consulta] No se pudo limpiar la respuesta: {error}", file=sys.stderr)
                 return answer
         self.client.update(
             "ejecucion_prompts", {"id": f"eq.{row['id']}"}, {"estado": "expirado"}

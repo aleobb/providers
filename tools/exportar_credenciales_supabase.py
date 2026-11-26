@@ -18,10 +18,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from cryptography.fernet import Fernet  # noqa: E402
 from dotenv import load_dotenv  # noqa: E402
 
 from core.credential_store import CredentialStore, CredentialStoreError  # noqa: E402
+from core.crypto_keys import build_cipher  # noqa: E402
 from integrations.supabase_sync.client import (  # noqa: E402
     SupabaseClient,
     SupabaseConfigurationError,
@@ -38,7 +38,7 @@ def main() -> int:
     try:
         store = CredentialStore()
         client = SupabaseClient()
-        fernet = Fernet(os.environ["PROVIDERS_CREDENTIALS_KEY"].encode())
+        fernet = build_cipher(os.environ["PROVIDERS_CREDENTIALS_KEY"])
     except (CredentialStoreError, SupabaseConfigurationError, KeyError, ValueError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 2

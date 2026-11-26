@@ -9,10 +9,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import InvalidToken
 from dotenv import dotenv_values
 
 from . import prompts
+from .crypto_keys import build_cipher
 from .provider import CredentialField
 
 
@@ -58,7 +59,7 @@ class CredentialStore:
                 "como variable de entorno antes de ejecutar el programa."
             )
         try:
-            self._cipher = Fernet(raw_key.encode("ascii"))
+            self._cipher = build_cipher(raw_key)
         except (ValueError, UnicodeEncodeError) as exc:
             raise CredentialStoreError(
                 f"{_KEY_ENV_VAR} no es una clave Fernet válida."

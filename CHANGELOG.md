@@ -2,6 +2,9 @@
 
 Una entrada por cambio, la más reciente arriba. El historial anterior está en Git.
 
+## 2026-11-27 — Docs: pendiente de actualizar el agente en la VM (PV-08)
+- Se registra en PENDIENTES (PV-08) la aprobación del comando #7 de la VM, que actualiza el agente con los cambios del 2026-11-26/27.
+
 ## 2026-11-27 — Providers: argparse, desempate por importe, claves únicas del CI y auditoría
 - CLI: `core/cli.py` lee los flags con `argparse` (mismos nombres y mismo dict de `parse_args()`); un flag desconocido, abreviado o sin valor ahora termina con error en vez de ignorarse, y hay `--help`. El error inesperado imprime el traceback.
 - Sync a Supabase: con varios comprobantes del mismo concepto y vencimiento elige el único cuyo importe coincide con el PDF (si no, se detiene nombrando los candidatos con su `nro_doc`); los conceptos se leen una vez por corrida.

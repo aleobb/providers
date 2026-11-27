@@ -327,3 +327,33 @@ def test_updating_credentials_changes_profile_session_version(credential_store):
     updated = credential_store.get_profile(profile_id)
     assert updated.session_version != original_version
     assert updated.credentials["email"] == "new@example.com"
+
+
+def test_campos_que_el_proveedor_ya_no_declara_se_quitan_y_el_orden_se_recupera(credential_store):
+    declared = [f.name for f in credential_store.get_credential_fields("edenor")]
+    with sqlite3.connect(credential_store.database_path) as connection:
+        provider_id = connection.execute("SELECT id FROM providers WHERE name = 'edenor'").fetchone()[0]
+        connection.execute(
+            "INSERT INTO provider_credential_fields (provider_id, field_name, label, required, secret, position) "
+            "VALUES (?, 'campo_viejo', 'Viejo', 1, 0, 0)",
+            (provider_id,),
+        )
+        connection.execute(
+            "UPDATE provider_credential_fields SET position = position + 5 WHERE provider_id = ? AND field_name <> 'campo_viejo'",
+            (provider_id,),
+        )
+
+    restarted = CredentialStore(credential_store.database_path)
+
+    fields = restarted.get_credential_fields("edenor")
+    assert [f.name for f in fields] == declared
+    with sqlite3.connect(credential_store.database_path) as connection:
+        positions = [r[0] for r in connection.execute(
+            "SELECT position FROM provider_credential_fields WHERE provider_id = ? ORDER BY position", (provider_id,))]
+    assert positions == list(range(len(declared)))
+
+
+def test_otros_proveedores_conservan_sus_campos_al_reiniciar(credential_store):
+    before = {p.name: [f.name for f in credential_store.get_credential_fields(p.name)] for p in all_providers()}
+    restarted = CredentialStore(credential_store.database_path)
+    assert {p.name: [f.name for f in restarted.get_credential_fields(p.name)] for p in all_providers()} == before

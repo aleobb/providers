@@ -48,6 +48,7 @@ class _Concept:
 class SupabaseInvoiceSync:
     def __init__(self, client: SupabaseClient) -> None:
         self._client = client
+        self._concepts: list[_Concept] | None = None  # los conceptos se leen una vez por corrida
 
     # ------------------------------------------------------------------ API
     def sync_invoice(
@@ -65,14 +66,11 @@ class SupabaseInvoiceSync:
                 {
                     "concepto_id": f"eq.{concept_id}",
                     "fecha_vto": f"eq.{data.current_due_date}",
-                    "select": "id,doc_storage_path,doc_drive_file_id",
+                    "select": "id,doc_storage_path,doc_drive_file_id,importe_pesos,importe_usd,nro_doc",
                 },
             )
             if len(existing) > 1:
-                raise SupabaseSyncError(
-                    "Hay varios comprobantes para el mismo concepto y "
-                    "vencimiento actual; no se actualizó ninguno."
-                )
+                existing = self._pick_among_duplicates(existing, fields)
             if existing:
                 row = existing[0]
                 self._client.update("comprobantes", {"id": f"eq.{row['id']}"}, fields)
@@ -166,6 +164,11 @@ class SupabaseInvoiceSync:
         return storage_path, drive_file_id
 
     def _load_concepts(self) -> list[_Concept]:
+        if self._concepts is None:
+            self._concepts = self._read_concepts()
+        return self._concepts
+
+    def _read_concepts(self) -> list[_Concept]:
         rows = self._client.select(
             "conceptos",
             {
@@ -249,6 +252,32 @@ class SupabaseInvoiceSync:
         return matches[0].id
 
     @staticmethod
+    def _pick_among_duplicates(candidates: list[dict], fields: dict[str, Any]) -> list[dict]:
+        """Desempata comprobantes con el mismo concepto y vencimiento por el importe del documento.
+
+        Solo se elige si exactamente un candidato tiene los mismos importes que el PDF; si no,
+        no se actualiza ninguno (nunca se adivina). `nro_doc` (1, 2, ...) ordena los candidatos
+        en el mensaje para que se identifiquen a mano.
+        """
+        def same(row: dict) -> bool:
+            for name in ("importe_pesos", "importe_usd"):
+                if name in fields and not _same_amount(row.get(name), fields[name]):
+                    return False
+            return any(name in fields for name in ("importe_pesos", "importe_usd"))
+
+        matching = [row for row in candidates if same(row)]
+        if len(matching) == 1:
+            return matching
+        ids = ", ".join(
+            f"#{row['id']}" + (f" (nro_doc {row['nro_doc']})" if row.get("nro_doc") else "")
+            for row in sorted(candidates, key=lambda r: (r.get("nro_doc") or 0, r["id"]))
+        )
+        raise SupabaseSyncError(
+            "Hay varios comprobantes para el mismo concepto y vencimiento actual "
+            f"({ids}) y el importe del documento no permite elegir uno; no se actualizó ninguno."
+        )
+
+    @staticmethod
     def _invoice_fields(data: InvoiceData, concept_id: int) -> dict[str, Any]:
         fields: dict[str, Any] = {"concepto_id": concept_id}
         amount_ars = data.amount_ars if data.amount_ars is not None else data.amount
@@ -265,6 +294,15 @@ class SupabaseInvoiceSync:
                 fields[name] = format(value, "f") if isinstance(value, Decimal) else value
         fields["ultima_modificacion"] = _now()
         return fields
+
+
+def _same_amount(stored: Any, new: Any) -> bool:
+    if stored is None or new is None:
+        return False
+    try:
+        return Decimal(str(stored)) == Decimal(str(new))
+    except ArithmeticError:
+        return False
 
 
 def _now() -> str:

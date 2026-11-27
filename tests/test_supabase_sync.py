@@ -118,3 +118,54 @@ def test_sin_vencimiento(pdf):
     client = FakeClient([concept(22, ["Nacion", "Visa"])])
     with pytest.raises(SupabaseSyncError, match="vencimiento"):
         SupabaseInvoiceSync(client).sync_invoice(pdf, data(current_due_date=None))
+
+
+def _duplicados(*amounts):
+    return [
+        {"id": i, "doc_storage_path": None, "doc_drive_file_id": None,
+         "importe_pesos": amount, "importe_usd": None, "nro_doc": n}
+        for n, (i, amount) in enumerate(zip((10, 11, 12), amounts), start=1)
+    ]
+
+
+def test_duplicados_se_desempatan_por_el_importe(pdf):
+    client = FakeClient(
+        [concept(22, ["Nacion", "Visa"])], comprobantes=_duplicados("695.00", "1500.50")
+    )
+    result = SupabaseInvoiceSync(client).sync_invoice(pdf, data())
+    assert not result.created and result.comprobante_id == 11
+    assert client.updates[0][0] == {"id": "eq.11"} and not client.inserts
+
+
+def test_duplicados_con_el_mismo_importe_detienen_y_nombran_los_candidatos(pdf):
+    client = FakeClient(
+        [concept(22, ["Nacion", "Visa"])], comprobantes=_duplicados("1500.50", "1500.50")
+    )
+    with pytest.raises(SupabaseSyncError, match=r"#10 \(nro_doc 1\), #11 \(nro_doc 2\)"):
+        SupabaseInvoiceSync(client).sync_invoice(pdf, data())
+    assert not client.updates and not client.inserts
+
+
+def test_duplicados_sin_importe_coincidente_no_se_adivina(pdf):
+    client = FakeClient(
+        [concept(22, ["Nacion", "Visa"])], comprobantes=_duplicados("695.00", None)
+    )
+    with pytest.raises(SupabaseSyncError, match="no permite elegir"):
+        SupabaseInvoiceSync(client).sync_invoice(pdf, data())
+    assert not client.updates and not client.inserts
+
+
+def test_los_conceptos_se_leen_una_sola_vez_por_corrida(pdf, tmp_path):
+    class Counting(FakeClient):
+        concept_reads = 0
+
+        def select(self, table, params=None):
+            if table == "conceptos":
+                Counting.concept_reads += 1
+            return super().select(table, params)
+
+    client = Counting([concept(22, ["Nacion", "Visa"])])
+    sync = SupabaseInvoiceSync(client)
+    sync.sync_invoice(pdf, data())
+    sync.sync_invoice(pdf, data(current_due_date="2026-12-10"))
+    assert Counting.concept_reads == 1

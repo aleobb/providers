@@ -2,6 +2,13 @@
 
 Una entrada por cambio, la más reciente arriba. El historial anterior está en Git.
 
+## 2026-11-27 — Providers: argparse, desempate por importe, claves únicas del CI y auditoría
+- CLI: `core/cli.py` lee los flags con `argparse` (mismos nombres y mismo dict de `parse_args()`); un flag desconocido, abreviado o sin valor ahora termina con error en vez de ignorarse, y hay `--help`. El error inesperado imprime el traceback.
+- Sync a Supabase: con varios comprobantes del mismo concepto y vencimiento elige el único cuyo importe coincide con el PDF (si no, se detiene nombrando los candidatos con su `nro_doc`); los conceptos se leen una vez por corrida.
+- `credential_store`: la limpieza de campos de credenciales obsoletos es general (se quitan los que el proveedor ya no declara) en lugar del caso por nombre de Medife.
+- Dependencias: `python-dotenv` sube a >=1.2.2 (vulnerabilidad PYSEC-2026-2270 detectada con pip-audit); nuevo `requirements-dev.txt` (pytest) y `constraints-ci.txt` (versiones exactas para el CI); workflow semanal `auditoria-dependencias.yml`.
+- Se borra `_legacy/` (paquetes viejos sin uso; queda en el historial de Git). Tests nuevos: parser, sync con duplicados y caché de conceptos, `credential_store`, contrato del `run-name` y vector Fernet compartido con el Worker. Docs: TECNICO, OPERACIONES, PENDIENTES.
+
 ## 2026-11-26 — Providers: timeout del agente, reintentos, redacción de logs y multi-clave Fernet
 - Agente: las descargas tienen tiempo máximo (`AGENT_RUN_TIMEOUT_MIN`, 45 min; 25 en GitHub Actions; `debug` e `ingresar` sin límite) y al vencer se corta el árbol de procesos; `--ejecucion` valida que el id sea numérico.
 - `SupabaseClient`: reintentos acotados (lecturas ante red/429/5xx; escrituras solo si no llegó a conectar o 429); el broker de OTP/MFA sigue esperando si Supabase falla un momento.

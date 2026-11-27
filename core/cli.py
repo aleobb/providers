@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
 import os
 import sys
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -46,62 +48,33 @@ from integrations.pdf_extractor.extractor import _read_text
 from pdfminer.pdfexceptions import PDFException
 
 
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="main.py",
+        description="Descarga comprobantes de proveedores. Los flags son los de siempre; "
+        "un flag desconocido o sin su valor termina con error en vez de ignorarse.",
+        allow_abbrev=False,
+    )
+    parser.add_argument("--debug", action="store_true", help="navegador visible y pausas para resolver captchas")
+    parser.add_argument("--listar", action="store_true", help="solo lista las cuentas del proveedor")
+    parser.add_argument("--todas", action="store_true", help="descarga todas las cuentas del proveedor")
+    parser.add_argument("--nosession", action="store_true", help="ignora la sesión guardada")
+    parser.add_argument("--proveedor", "-p", metavar="NOMBRE", type=str.lower, help="proveedor a usar")
+    parser.add_argument("--cuenta", metavar="ID", help="cuenta puntual del proveedor")
+    parser.add_argument("--todos-proveedores", action="store_true", dest="todos_proveedores", help="todos los proveedores")
+    parser.add_argument("--ingresar", action="store_true", help="abre el portal ya autenticado (un solo proveedor)")
+    parser.add_argument("--airtable", action="store_true", help="sincroniza con Airtable al descargar")
+    parser.add_argument("--airtable-documento", metavar="ARCHIVO", dest="airtable_documento", help="sube un documento a Airtable")
+    parser.add_argument("--banco", metavar="NOMBRE", help="banco (solo con --airtable-documento)")
+    parser.add_argument("--gestionar-credenciales", action="store_true", dest="gestionar_credenciales", help="gestor de perfiles de credenciales")
+    parser.add_argument("--datos-pdf-csv", metavar="CSV", dest="datos_pdf_csv", help="escribe los datos del PDF en un CSV")
+    parser.add_argument("--url", metavar="URL", help="URL puntual")
+    return parser
+
+
 def parse_args() -> dict:
-    args = sys.argv[1:]
-    result = {
-        "debug": False,
-        "listar": False,
-        "todas": False,
-        "nosession": False,
-        "cuenta": None,
-        "proveedor": None,
-        "todos_proveedores": False,
-        "url": None,
-        "gestionar_credenciales": False,
-        "datos_pdf_csv": None,
-        "ingresar": False,
-        "airtable": False,
-        "airtable_documento": None,
-        "banco": None,
-    }
-    i = 0
-    while i < len(args):
-        if args[i] == "--debug":
-            result["debug"] = True
-        elif args[i] == "--listar":
-            result["listar"] = True
-        elif args[i] == "--todas":
-            result["todas"] = True
-        elif args[i] == "--nosession":
-            result["nosession"] = True
-        elif args[i] in ("--proveedor", "-p") and i + 1 < len(args):
-            result["proveedor"] = args[i + 1].lower()
-            i += 1
-        elif args[i] == "--cuenta" and i + 1 < len(args):
-            result["cuenta"] = args[i + 1]
-            i += 1
-        elif args[i] == "--todos-proveedores":
-            result["todos_proveedores"] = True
-        elif args[i] == "--ingresar":
-            result["ingresar"] = True
-        elif args[i] == "--airtable":
-            result["airtable"] = True
-        elif args[i] == "--airtable-documento" and i + 1 < len(args):
-            result["airtable_documento"] = args[i + 1]
-            i += 1
-        elif args[i] == "--banco" and i + 1 < len(args):
-            result["banco"] = args[i + 1]
-            i += 1
-        elif args[i] == "--gestionar-credenciales":
-            result["gestionar_credenciales"] = True
-        elif args[i] == "--datos-pdf-csv" and i + 1 < len(args):
-            result["datos_pdf_csv"] = args[i + 1]
-            i += 1
-        elif args[i] == "--url" and i + 1 < len(args):
-            result["url"] = args[i + 1]
-            i += 1
-        i += 1
-    return result
+    """Lee sys.argv y devuelve el mismo dict de siempre (las claves no cambian)."""
+    return vars(build_parser().parse_args(sys.argv[1:]))
 
 
 async def _download_one(
@@ -849,4 +822,5 @@ def main() -> None:
         sys.exit(0)
     except Exception as e:
         print(f"\nError inesperado: {e}", file=sys.stderr)
+        traceback.print_exc()
         sys.exit(1)

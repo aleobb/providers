@@ -17,7 +17,8 @@ relacionados: [PRV-TEC, PRV-POR, PRV-DEC, PRV-PEN]
 
 | Workflow | Disparador | Qué hace |
 |---|---|---|
-| `tests.yml` | push/PR a `master` (salvo cambios solo de `*.md` o `docs/**`) y manual | Python 3.12, `pip install -r requirements.txt pytest`, `python -m pytest -q` |
+| `tests.yml` | push/PR a `master` (salvo cambios solo de `*.md` o `docs/**`) y manual | Python 3.12, `pip install -r requirements-dev.txt -c constraints-ci.txt`, `python -m pytest -q` |
+| `auditoria-dependencias.yml` | lunes 07:00 UTC y manual | `pip-audit` sobre `constraints-ci.txt` y sobre lo que resolvería `requirements.txt`; si hay vulnerabilidades falla y GitHub avisa por mail (sin PRs ni ramas) |
 | `ejecutar-ejecucion.yml` | `workflow_dispatch` con `ejecucion_id` (lo dispara el Worker de finanzas) | `playwright install chrome --with-deps`, `python agent.py --ejecucion <id>`; solo portales de nube sin 2FA/captcha; timeout 30 min; run-name «Ejecución <id>» |
 | `docs-check.yml` | cambios en `docs/**`, `AGENTS.md`, `README.md`, `CHANGELOG.md` | `python tools/docs_check.py` |
 

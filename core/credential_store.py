@@ -172,20 +172,20 @@ class CredentialStore:
                         )
                     ),
                 )
-            # Corrección puntual del esquema inicial de Medife: email -> documento.
-            # Conserva perfiles cifrados y metadatos de todos los otros proveedores.
-            medife_id = connection.execute(
-                "SELECT id FROM providers WHERE name = 'medife'"
-            ).fetchone()
-            if medife_id is not None:
+            # Campos que el proveedor ya no declara (p. ej. Medife pasó de email a documento) se quitan de
+            # los metadatos y el resto recupera su orden. Los perfiles cifrados no se tocan.
+            for provider_class in all_provider_classes():
+                declared = [field.name for field in provider_class.credential_fields]
+                provider_id = self._provider_id(connection, provider_class.name)
+                marks = ",".join("?" for _ in declared) or "''"
                 removed = connection.execute(
-                    "DELETE FROM provider_credential_fields WHERE provider_id = ? AND field_name = 'email'",
-                    (medife_id["id"],),
+                    f"DELETE FROM provider_credential_fields WHERE provider_id = ? AND field_name NOT IN ({marks})",
+                    (provider_id, *declared),
                 ).rowcount
                 if removed:
-                    connection.execute(
-                        "UPDATE provider_credential_fields SET position = 2 WHERE provider_id = ? AND field_name = 'password'",
-                        (medife_id["id"],),
+                    connection.executemany(
+                        "UPDATE provider_credential_fields SET position = ? WHERE provider_id = ? AND field_name = ?",
+                        ((position, provider_id, name) for position, name in enumerate(declared)),
                     )
             legacy_table = connection.execute(
                 """

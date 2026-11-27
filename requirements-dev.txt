@@ -1,0 +1,3 @@
+# Dependencias de desarrollo: lo de producción más pytest.
+-r requirements.txt
+pytest>=8

@@ -32,7 +32,6 @@ providers/<portal>/     # aysa claro edenor edesur mastercard medife metrogas te
 deploy/oracle/          # scripts de instalación de la VM (ver OPERACIONES.md)
 tools/                  # exportar_credenciales_supabase.py, docs_check.py
 tests/                  # pruebas compartidas; las de cada portal en providers/<portal>/tests/
-_legacy/                # paquetes independientes viejos (edenor_downloader, metrogas_downloader)
 ```
 Salidas locales: `facturas/` (PDF `{proveedor}_{periodo}_{cliente}_factura.pdf`), `ejecucion.log`, `.credentials/providers.sqlite3`, `.sessions/`, `.chrome_profile/`.
 
@@ -49,7 +48,7 @@ Salidas locales: `facturas/` (PDF `{proveedor}_{periodo}_{cliente}_factura.pdf`)
 - Los servicios HTTP que descargan varias cuentas reutilizan su `httpx.AsyncClient` durante el ciclo del proveedor; el core los libera al terminar. Claro y Telecentro comparten `core/network_diagnostics.py` (filtrado de dominios, resumen de respuestas, **redacción de secretos**).
 
 ## 3. CLI (`python main.py …`)
-> **TL;DR:** `--proveedor <código> --todas` descarga; `--listar` muestra cuentas; `--debug` abre el navegador visible; `--ingresar` deja el portal abierto.
+> **TL;DR:** `--proveedor <código> --todas` descarga; `--listar` muestra cuentas; `--debug` abre el navegador visible; `--ingresar` deja el portal abierto. Los flags los lee `argparse` (`python main.py --help`): un flag desconocido, abreviado o sin su valor termina con error (antes se ignoraba en silencio).
 
 | Flag | Efecto |
 |---|---|
@@ -88,7 +87,7 @@ Si un proveedor tiene varios perfiles, el programa pregunta cuál usar (con uno 
 ## 6. Sincronización y extracción
 > **TL;DR:** nunca se crean conceptos; un comprobante se identifica por concepto + vencimiento actual; el PDF va a Storage y, si hay Drive, también allí.
 
-- **Supabase (`integrations/supabase_sync`):** el concepto se busca por proveedor (+ banco) y se valida contra `conceptos."Identificador"` (nº de cliente/cuenta/servicio extraído del PDF); si falta o no coincide, se detiene. Una coincidencia de comprobante actualiza, ninguna crea, varias detienen sin modificar nada; los campos ausentes no sobrescriben datos. PDF → bucket `Comprobantes/<comprobante_id>/<nombre>` (`doc_storage_path`); con Drive configurado, copia y `doc_drive_file_id`/`doc_drive_link`; si ya hay documento, no se vuelve a subir; un fallo de Storage no impide registrar el comprobante (aviso en el log).
+- **Supabase (`integrations/supabase_sync`):** el concepto se busca por proveedor (+ banco) y se valida contra `conceptos."Identificador"` (nº de cliente/cuenta/servicio extraído del PDF); si falta o no coincide, se detiene. Una coincidencia de comprobante actualiza, ninguna crea; si hay varias con el mismo concepto y vencimiento, se elige la única que tenga los mismos importes que el PDF y si no hay una sola se detiene sin modificar nada (el mensaje nombra los candidatos con su `nro_doc`, la columna de desempate manual 1, 2, …); los conceptos se leen una vez por corrida; los campos ausentes no sobrescriben datos. PDF → bucket `Comprobantes/<comprobante_id>/<nombre>` (`doc_storage_path`); con Drive configurado, copia y `doc_drive_file_id`/`doc_drive_link`; si ya hay documento, no se vuelve a subir; un fallo de Storage no impide registrar el comprobante (aviso en el log).
 - **Airtable (opcional, vigente durante el paralelo con la app):** `AIRTABLE_TOKEN` y `AIRTABLE_BASE_ID`; tablas `Comprobantes` y `Conceptos` (ajustables con `AIRTABLE_*` de `.env.example`); `Comprobantes` enlaza a `Conceptos` por `Concepto`; el concepto se busca por `Nombre` con los términos de proveedor y banco y se valida `Conceptos.Identificador`; no se usa el titular ni se crean conceptos. Guarda `Fecha Vto.`, `Importe Pesos`, `Importe USD`, `Prox.Vto.`, `Cierre Actual`, `Prox.Cierre`; mismo upsert que arriba; el PDF se carga directo al campo `Doc.` con la API de carga (sin URL pública) y se omite si el registro ya tiene adjuntos. `--airtable-documento <pdf> [--proveedor p] [--banco b]` crea o actualiza desde un PDF local; los layouts Visa/Mastercard se detectan solos, para otros hay que indicar `--proveedor`.
 - **Google Drive (opcional):** `GOOGLE_DRIVE_FOLDER_ID` y `GOOGLE_SERVICE_ACCOUNT_JSON` (contenido o ruta); nombres y rutas en `integrations/google_drive/naming.py` + hook `drive_target`. Google bloquea el acceso a Drive desde IPs de datacenter (HTTP 403): el agente y Actions usan la API con cuenta de servicio.
 - **Extractor de PDF (`integrations/pdf_extractor`):** `pdfplumber` sobre la capa de texto (**no es OCR**); en una descarga lee las 2 primeras páginas, en lote todo el PDF. Reglas comunes en `invoice_data.py`; cada proveedor agrega patrones prioritarios con `invoice_data_patterns` (importe, vencimiento actual, próximo, identificador), con los comunes como alternativa; patrones específicos para AySA, Claro, Edenor, Edesur y Metrogas (en Metrogas se prioriza la fecha de pago junto a `FECHA DE VENCIMIENTO` sobre la fecha CESP del pie). Tarjetas (`card_statement.py`): parsers de Visa, Visa Nación y Mastercard BBVA/ICBC (el ICBC también reconoce `Estado de cuenta al`, `Saldo actual` y fechas de vencimiento/cierre) con banco, importes ARS/USD y cierres; un layout no reconocido no se asume Visa; durante una descarga manda el banco de la cuenta seleccionada. Importes como `Decimal`, fechas `YYYY-MM-DD`. `estimated_next_due_date_months` estima el próximo vencimiento solo si no hay uno explícito y sí el actual (si el día no existe en el mes destino, último día; Medifé: 1 mes). Hay `parsing.py` (importes) y `csv_export.py`.
@@ -121,10 +120,10 @@ Generar la clave: `python -c "from cryptography.fernet import Fernet; print(Fern
 `comprobantes`, `conceptos` (`"Identificador"`), `proveedor_portales`, `portal_perfiles`, `ejecuciones`, `ejecucion_logs`, `ejecucion_prompts`, `vm_comandos`; buckets privados `Comprobantes` (10 MB) y `ejecucion-logs` (5 MB). `programaciones` y las vistas las usa solo la web. Esquema completo y migraciones: `docs/` de `aleobb/finanzas`.
 
 ## 10. Pruebas y calidad
-> **TL;DR:** `python -m pytest` y `git diff --check` antes de cerrar; línea base 200 pasaron, 30 omitidos; CI en `tests.yml`.
+> **TL;DR:** `python -m pytest` y `git diff --check` antes de cerrar; línea base 249 pasaron, 30 omitidos; CI en `tests.yml`.
 
 - Compartidas en `tests/`; las de un portal en `providers/<portal>/tests/`. Como esas carpetas no son paquetes, **los módulos de test deben tener nombres únicos** en todo el árbol. `visa_debug_session.py` y `visa_test_switch.py` son utilitarios manuales, no pruebas.
-- `pytest` no está en `requirements.txt` (`pip install pytest`). 30 tests quedan omitidos por falta de PDFs de muestra (tienen datos personales y no van al repo; usar PDFs sintéticos).
+- `pytest` está en `requirements-dev.txt` (`pip install -r requirements-dev.txt`). El CI instala con `constraints-ci.txt` (versiones exactas, Python 3.12) y `auditoria-dependencias.yml` revisa cada lunes vulnerabilidades con `pip-audit`; la VM y tu PC siguen con los rangos de `requirements.txt`. `tests/test_contratos.py` fija el `run-name` que espera el Worker de finanzas. 30 tests quedan omitidos por falta de PDFs de muestra (tienen datos personales y no van al repo; usar PDFs sintéticos).
 - Los cambios en este repo **solo agregan funciones**: no cambian la forma de ejecutar desde la consola local.
 
 ## 11. Troubleshooting

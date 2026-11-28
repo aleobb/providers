@@ -2,6 +2,9 @@
 
 Una entrada por cambio, la más reciente arriba. El historial anterior está en Git.
 
+## 2026-11-27 — Docs: estado del comando #7 de la VM (PV-08)
+- El comando #7 (actualizar el agente) se aprobó y terminó con el `error: Interrumpido` esperado; PV-08 queda con la verificación de versión pendiente.
+
 ## 2026-11-27 — Docs: pendiente de actualizar el agente en la VM (PV-08)
 - Se registra en PENDIENTES (PV-08) la aprobación del comando #7 de la VM, que actualiza el agente con los cambios del 2026-11-26/27.
 

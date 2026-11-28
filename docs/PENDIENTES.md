@@ -23,7 +23,7 @@ relacionados: [PRV-TEC, PRV-POR, PRV-OPS, PRV-DEC]
 | PV-04 | `tools/recifrar_credenciales.py` y soporte multi-clave Fernet en el agente Python | P1 | Hecho 2026-11-26 (⚠ falta probar la rotación real con las claves de producción) |
 | PV-05 | Versionar la instalación de KasmVNC en `deploy/oracle/` y retirar noVNC/TigerVNC de `instalar.sh` | P1 | Abierto |
 | PV-06 | Medifé y Telecentro: confirmar estabilidad del runner `actions` o pasarlos a `agente` | P2 | Abierto |
-| PV-08 | Aprobar el comando #7 de la VM (`git pull`, `pip install`, reinicio del agente) y comprobar con una descarga que el agente corre con el timeout, los reintentos y la redacción de logs nuevos | P1 | Abierto (Ale) |
+| PV-08 | Aprobar el comando #7 de la VM (`git pull`, `pip install`, reinicio del agente) y comprobar con una descarga que el agente corre con el timeout, los reintentos y la redacción de logs nuevos | P1 | Abierto (el comando #7 se aprobó el 2026-11-27 y terminó en el `error: Interrumpido` esperado; falta confirmar la versión con `git log -1` y `systemctl is-active providers-agent`, y una descarga de prueba) |
 | PV-07 | PDFs sintéticos para recuperar los 30 tests omitidos | P3 | Abierto (`pytest` ya está en `requirements-dev.txt`, 2026-11-26) |
 | PV-08 | `tools/paridad_airtable.py` (comparar un CSV exportado de Airtable contra Supabase) | P2 | Idea |
 | PV-09 | Cerrar `rpcbind` (111) y actualizar paquetes en la VM (pedidos #5 y #6 terminados ok el 2026-11-22, según Ale); evaluar swap y logrotate de logs propios (journal limitado a 500 MB / 30 días) | P2 | Casi hecho |

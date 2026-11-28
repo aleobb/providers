@@ -2,6 +2,9 @@
 
 Una entrada por cambio, la más reciente arriba. El historial anterior está en Git.
 
+## 2026-11-28 — Docs: PV-08 cerrado
+- Ale corrió una descarga de Metrogas con el runner `agente` de la VM (ejecución #19, modo debug) con el mismo resultado que en `actions`; PV-08 queda hecho.
+
 ## 2026-11-28 — Docs: verificación del agente de la VM (PV-08)
 - El comando #8 (solo lectura) confirmó el agente activo en el commit `3e75da4` (código igual al de `master`, que solo agregó docs) y que `core.redact` importa. Una descarga de Metrogas corrió bien en el runner `actions` (2 comprobantes sincronizados; el error es de un cliente que ya no existe). PV-08 sigue parcial: falta una descarga con el runner `agente`. Se renumera a PV-12 el segundo PV-08 (`tools/paridad_airtable.py`), que repetía el ID.
 
